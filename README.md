@@ -22,11 +22,9 @@ Topological data analysis emerged, as a field of mathematics, as a powerful tool
 
 ## Description
 
-The class of integral sheaf metrics is an esemble of distances between multi-parameter persistence modules that successfully tackles the issues encountered with the matching distance. Through computational geometry and optimization machine learning, we provide a way to efficiently compute the so-called linear integral sheaf metric. We also present applications to data classification - the input to standard clustering algorithms is a distance matrix encoding pairwise linear integral sheaf metrics between multi-parameter persistence modules. ```math
-SE = \frac{\sigma}{\sqrt{n}}
-```
+The class of integral sheaf metrics is an esemble of distances between multi-parameter persistence modules that successfully tackles the issues encountered with the matching distance. Through computational geometry and optimization machine learning, we provide a way to efficiently compute the so-called linear integral sheaf metric. We also present applications to data classification - the input to standard clustering algorithms is a distance matrix encoding pairwise linear integral sheaf metrics between multi-parameter persistence modules. 
 
-<img width="450" alt="figure" src="https://github.com/LucaNyckees/zigzag/blob/main/figures/11-Figure2-1.png">
+<img width="450" alt="figure" src="https://github.com/LucaNyckees/sheaf_metric/blob/main/def_ISM.png">
 
 
 
