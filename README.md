@@ -16,9 +16,21 @@ This project is supervised by Nicolas Berkouk and Kathryn Hess Bellwald, from th
 Nicolas Berkouk : [EPFL profile](https://people.epfl.ch/nicolas.berkouk), [Personal site](https://nberkouk.github.io/)<br />
 Luca Nyckees : [EPFL profile](https://people.epfl.ch/luca.nyckees)
 
+## Mathematical Context
+
+Topological data analysis emerged, as a field of mathematics, as a powerful tool
+to study the shape of data. It has found many applications in domains like com-
+putational neuroscience, machine learning and statistical data analysis. The most
+important concept in this field is the notion of persistent homology, allowing one to
+associate (stable and complete) topological computational invariants to point cloud
+data and other spaces. The mathematical setting of persistent homology is very well
+understood. There is a natural generalization to higher dimensions, called multi-
+parameter persistent homology, that provides a much greater challenge, as the related
+algebraic objects to deal with are harder to manipulate.
+
 ## Description
 
-The integral sheaf metric is a distance between multi-parameter persistence modules that successfully tackles the issues encountered with the matching distance. Through computational geometry and optimization machine learning, we provide a way to efficiently compute this distance. 
+The class of integral sheaf metrics is an esemble of distances between multi-parameter persistence modules that successfully tackles the issues encountered with the matching distance. Through computational geometry and optimization machine learning, we provide a way to efficiently compute the so-called linear integral sheaf metric. We also present applications to data classification - the input to standard clustering algorithms is a distance matrix $d$
 
 <img width="450" alt="figure" src="https://github.com/LucaNyckees/zigzag/blob/main/figures/11-Figure2-1.png">
 
