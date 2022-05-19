@@ -44,7 +44,7 @@ def adversarial_pipeline(network, data):
     """
     This function encodes the pipeline of the adversarial attack detection.
     Arguments :
-        network : a simplicial complex (gudhi.simplexTree) representing the neural network
+        network : a .txt file encoding a simplicial complex (exactly one simplex per line)
         data : a tensor np.array of shape (n_inputs, n_nodes, n_features), where n_inputs 
             is the number of images that we classify as normal input or adv. input, n_nodes
             is the number of nodes in the neural network, and n_features is the number of 
@@ -57,7 +57,7 @@ def adversarial_pipeline(network, data):
 
     D = np.zeros((N,N))
 
-    for i, multifilt1 in tqdm(enumerate(data)):
+    for i, multifilt1 in enumerate(data):
         for j, multifilt2 in enumerate(data):
             if i<j:
                 # random intial projection 

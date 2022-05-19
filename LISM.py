@@ -56,7 +56,7 @@ def LISM_optimization(model, fast=False, use_reg=True, alpha=1, lambda_=1, sigma
                                 'diagrams':[]
     }
 
-    for epoch in tqdm(range(50+1)):
+    for epoch in range(50+1):
         
         with tf.GradientTape() as tape:
             
@@ -76,17 +76,19 @@ def LISM_optimization(model, fast=False, use_reg=True, alpha=1, lambda_=1, sigma
         gradients[0] = gradients[0] + np.random.normal(loc=0., scale=sigma, size=gradients[0].shape)
         optimizer.apply_gradients(zip(gradients, model.trainable_variables))
 
+        optimization['projections'].append(model.p.numpy())
+
         if not fast:
         
             optimization['losses'].append(loss.numpy())
             optimization['amplitudes'].append(amplitude.numpy())
-            optimization['projections'].append(model.p.numpy())
             optimization['diagrams'].append((dgm1,dgm2))
 
-            if epoch > 5:
-                diff = tf.abs(tf.norm(optimization['projections'][epoch])-tf.norm(optimization['projections'][epoch-1]))
-                if diff < 0.0005:
-                    break
+        if epoch > 5:
+            diff = tf.abs(tf.norm(optimization['projections'][epoch])-tf.norm(optimization['projections'][epoch-1]))
+            if diff < 0.0005:
+                break
+
     if fast:
         return amplitude.numpy()
     else:
