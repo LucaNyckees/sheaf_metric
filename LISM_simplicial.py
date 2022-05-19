@@ -21,7 +21,8 @@ class SimplexTreeModel_ISM(tf.keras.Model):
         st, fct1, fct2 = self.st, tf.tensordot(self.F,self.p,1), tf.tensordot(self.G,self.p,1)
 
         # Turn STPers into a numpy function
-        SimplexTreeTF = lambda fct: tf.numpy_function(SimplexTree, [np.array([st], dtype=str), fct, d, c], [tf.int32 for _ in range(2*c)])
+        SimplexTreeTF = lambda fct: tf.numpy_function(SimplexTree, 
+        [np.array([st], dtype=str), fct, d, c], [tf.int32 for _ in range(2*c)])
         
         # Don't try to compute gradients for the vertex pairs
         fcts1 = tf.reshape(fct1, [1, fct1.shape[0]])
@@ -62,14 +63,14 @@ def adversarial_pipeline(network, data):
                 # random intial projection 
                 theta = np.random.rand()*np.pi/2
                 p_ = np.array([np.cos(theta), np.sin(theta)], dtype=np.float32).reshape(2,1)
-                p = tf.Variable(initial_value=p_, trainable=True)
+                p = tf.Variable(initial_value=p_, trainable=True, dtype = tf.float32)
 
                 # converting multifiltrations to tensorflow non-trainable variables
-                m1 = tf.Variable(initial_value=multifilt1, trainable=False)
-                m2 = tf.Variable(initial_value=multifilt2, trainable=False)
+                m1 = tf.Variable(initial_value=multifilt1, trainable=False, dtype=tf.float32)
+                m2 = tf.Variable(initial_value=multifilt2, trainable=False, dtype=tf.float32)
 
                 # initializing the input-model
-                model = SimplexTreeModel_ISM(p, m1, m2, network, dim=1)
+                model = SimplexTreeModel_ISM(p, m1, m2, stbase = network, dim=1)
                 dist = LISM_optimization(model, fast=True)
                 D[i,j] = dist
 
