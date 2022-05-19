@@ -1,4 +1,4 @@
-from turtle import forward
+#from turtle import forward
 from difftda import Cubical
 import tensorflow as tf
 import numpy as np
