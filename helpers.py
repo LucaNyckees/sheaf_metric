@@ -13,6 +13,33 @@ from gtda.images import HeightFiltration
 from sklearn.cluster                      import KMeans
 import plotly.figure_factory as ff
 from plotly.colors import n_colors
+import plotly.express as px
+
+def computation_time(N, single_distance_time):
+
+    total_entries = N*(N-1)/2
+    computation_time = total_entries * single_distance_time
+    print("Computation of distance matrix will take approx. {} minutes.".format(computation_time/60))
+
+def plot_bifiltration(plot1,plot2):
+
+    imgs_ = np.vstack((plot1,plot2)).reshape(8,28,28)
+    fig = px.imshow(imgs_, facet_col=0, facet_col_wrap=4)
+    fig.update_layout(height=400, width=800,title="Illustrating the filtrations")
+    names = ["original image", "binarized filtration", "radial filtration", "height filtration"]
+    for i, name in enumerate(names):
+        fig.layout.annotations[i]['text'] = name
+    fig.show()
+
+def plot_optim_filtration(optimization, I, J):
+
+    p_opt = optimization['projections'][-1]
+    I_opt = tf.reshape(tf.tensordot(I,p_opt,1),shape=[28,28])
+    J_opt = tf.reshape(tf.tensordot(J,p_opt,1),shape=[28,28])
+    imgs_opt  = np.vstack((I_opt,J_opt)).reshape(2,28,28)
+    fig = px.imshow(imgs_opt, facet_col=0, facet_col_wrap=2)
+    fig.update_layout(height=290, width=600, title="Optimal LISM arguments (optimized bifiltrations)")
+    fig.show()
 
 
 def plot_optim(optimization, show_diagrams=False):
@@ -135,14 +162,19 @@ def height_filtration(I, v = [1,0]):
     return I_height
 
 
-def wasserstein_matrix(images, dim, filtration, param):
+def wasserstein_matrix(images, train_y, dim, filtration, param):
 
     N = len(images)
+    labels = train_y[:N]
+    l = [{'image':images[i], 'label':labels[i]} for i in range(N)]
+    l_sorted = sorted(l, key=lambda d: d['label']) 
+    images_bb = np.array([l_sorted[i]['image'] for i in range(N)])
+    labels_bb = np.array([l_sorted[i]['label'] for i in range(N)])
 
     D = np.zeros((N,N))
 
-    for i, img1 in tqdm(enumerate(images)):
-        for j, img2 in enumerate(images):
+    for i, img1 in tqdm(enumerate(images_bb)):
+        for j, img2 in enumerate(images_bb):
             if i<j:
                 if filtration=="height":
                     I = height_filtration(img1, param)
@@ -166,7 +198,9 @@ def wasserstein_matrix(images, dim, filtration, param):
 
     D += np.transpose(D)
 
-    return D
+    fig = px.imshow(D,height=470, width=470)
+
+    return D, fig, images_bb, labels_bb
 
     
 
