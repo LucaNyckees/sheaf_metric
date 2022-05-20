@@ -19,7 +19,8 @@ def SimplexTree(stbase, fct, dim, card):
     #             fct (function values on the vertices of stbase),
     #             dim (homological dimension),
     #             card (number of persistence diagram points, sorted by distance-to-diagonal)
-    
+
+
     # Copy stbase in another simplex tree st
     st = gd.SimplexTree()
     f = open(stbase[0], "r")
@@ -28,11 +29,12 @@ def SimplexTree(stbase, fct, dim, card):
         s = [int(v) for v in ints[:-1]]
         st.insert(s, -1e10)
     f.close()
-        
+    
     # Assign new filtration values
     for i in range(st.num_vertices()):
         st.assign_filtration([i], fct[i])
     st.make_filtration_non_decreasing()
+
     
     # Compute persistence diagram
     dgm = st.persistence()
