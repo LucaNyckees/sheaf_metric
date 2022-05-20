@@ -39,7 +39,7 @@ class SimplexTreeModel_ISM(tf.keras.Model):
 
 
 
-def adversarial_pipeline(network, data):
+def adversarial_pipeline(network, data, dim):
 
     """
     This function encodes the pipeline of the adversarial attack detection.
@@ -57,9 +57,12 @@ def adversarial_pipeline(network, data):
 
     D = np.zeros((N,N))
 
-    for i, multifilt1 in enumerate(data):
-        for j, multifilt2 in enumerate(data):
+    for i in tqdm(range(N)):
+        for j in range(N):
             if i<j:
+                
+                multifilt1 = data[i]
+                multifilt2 = data[j]
                 # random intial projection 
                 theta = np.random.rand()*np.pi/2
                 p_ = np.array([np.cos(theta), np.sin(theta)], dtype=np.float32).reshape(2,1)
@@ -70,7 +73,7 @@ def adversarial_pipeline(network, data):
                 m2 = tf.Variable(initial_value=multifilt2, trainable=False, dtype=tf.float32)
 
                 # initializing the input-model
-                model = SimplexTreeModel_ISM(p, m1, m2, stbase = network, dim=1)
+                model = SimplexTreeModel_ISM(p, m1, m2, stbase = network, dim=dim)
                 dist = LISM_optimization(model, fast=True)
                 D[i,j] = dist
 

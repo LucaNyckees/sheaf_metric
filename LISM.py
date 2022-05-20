@@ -57,7 +57,28 @@ def LISM_optimization(model, fast=False, use_reg=True, alpha=1, lambda_=1, sigma
     }
 
     for epoch in range(50+1):
-        
+
+        if epoch > 5:
+            diff = tf.abs(tf.norm(optimization['projections'][epoch])-tf.norm(optimization['projections'][epoch-1]))
+                
+            if diff < 0.0005:
+                    
+                p_opt = model.p/tf.norm(model.p)
+
+                model.p = p_opt
+
+                dgm1, dgm2 = model.call()
+
+                amplitude = alpha * tf.sqrt(wasserstein_distance(dgm1, dgm2, order=2, enable_autodiff=True))
+                loss = - amplitude + lambda_*(tf.norm(model.p)-1)**2
+
+                optimization['projections'].append(model.p.numpy())
+                optimization['losses'].append(loss.numpy())
+                optimization['amplitudes'].append(amplitude.numpy())
+                optimization['diagrams'].append((dgm1,dgm2))
+                
+                break
+
         with tf.GradientTape() as tape:
             
             dgm1, dgm2 = model.call()
@@ -77,17 +98,9 @@ def LISM_optimization(model, fast=False, use_reg=True, alpha=1, lambda_=1, sigma
         optimizer.apply_gradients(zip(gradients, model.trainable_variables))
 
         optimization['projections'].append(model.p.numpy())
-
-        if not fast:
-        
-            optimization['losses'].append(loss.numpy())
-            optimization['amplitudes'].append(amplitude.numpy())
-            optimization['diagrams'].append((dgm1,dgm2))
-
-        if epoch > 5:
-            diff = tf.abs(tf.norm(optimization['projections'][epoch])-tf.norm(optimization['projections'][epoch-1]))
-            if diff < 0.0005:
-                break
+        optimization['losses'].append(loss.numpy())
+        optimization['amplitudes'].append(amplitude.numpy())
+        optimization['diagrams'].append((dgm1,dgm2))
 
     if fast:
         return amplitude.numpy()
@@ -257,3 +270,5 @@ def fast_grid_search(I, J, dim=1, card=50):
     dist = max(distances)
     
     return dist
+
+
