@@ -1,111 +1,195 @@
-#from turtle import forward
-from difftda import Cubical
+from difftda import SimplexTreeModel_ISM, CubicalModel_ISM
 import tensorflow as tf
 import numpy as np
 import gudhi as gd
-import torch
 from torch.autograd import Function
 import math
 from gudhi.wasserstein                    import wasserstein_distance
 import plotly.graph_objects as go
 from tqdm import tqdm
+from difftda import Cubical
 
+class pipeline():
 
+    def __init__(self, object, meta_data, card, dims=[0]):
 
-class CubicalModel_ISM(tf.keras.Model):
-    def __init__(self, p, I, J, dim=1, card=50):
-        super(CubicalModel_ISM, self).__init__()
-        self.p = p
-        self.I = I
-        self.J = J
-        self.dim = dim
+        """
+        Args:
+
+            object (int): 0 for simplicial complex, 1 for cubical complex
+
+            meta_data : 
+                (1) if object==0, a tuple (data, network) where 
+                network is path to a .txt file encoding a simplicial 
+                complex and data consists of N multifiltrations (data
+                is a np.array of shape [N, n_nodes, n_features]).
+
+                (2) if object==1, meta_data=[data], a np.array of shape
+                [N, n_pixels, p_pixels] encoding N images. 
+
+            card (int): cardinality of persistence diagram (e.g. nb_nodes)
+
+            dims (list of int): a list of homological dimensions
+        """
+
+        super(pipeline, self).__init__()
+        self.object = object
+        self.meta_data = meta_data
         self.card = card
+        self.dims = dims
+       
         
-    def call(self):
+    def simp_persistence(self, p, F, G, dim):
 
-        Xp = tf.reshape(tf.tensordot(self.I,self.p,1),shape=[28,28])
-        Yp = tf.reshape(tf.tensordot(self.J,self.p,1),shape=[28,28])
+        network = self.meta_data[1]
 
-        d, c, D = self.dim, self.card, len(Xp.shape)
-        XX = tf.reshape(Xp, [1, Xp.shape[0], Xp.shape[1]])
-        YY = tf.reshape(Yp, [1, Yp.shape[0], Yp.shape[1]])
-        
-        # Turn numpy function into tensorflow function
-        CbTF = lambda X: tf.numpy_function(Cubical, [X, d, c], [tf.int32 for _ in range(2*D*c)])
-        
-        # Compute pixels associated to positive and negative simplices 
-        # Don't compute gradient for this operation
-        
-        inds1 = tf.nest.map_structure(tf.stop_gradient, tf.map_fn(CbTF,XX,fn_output_signature=[tf.int32 for _ in range(2*D*c)]))
-        inds2 = tf.nest.map_structure(tf.stop_gradient, tf.map_fn(CbTF,YY,fn_output_signature=[tf.int32 for _ in range(2*D*c)]))
+        model = SimplexTreeModel_ISM(p, F, G, stbase = network, dim=dim, card=self.card)
 
-        
-        # Get persistence diagram by simply picking the corresponding entries in the image
-        dgm1 = tf.reshape(tf.gather_nd(Xp, tf.reshape(inds1, [-1,D])), [-1,2])
-        dgm2 = tf.reshape(tf.gather_nd(Yp, tf.reshape(inds2, [-1,D])), [-1,2])
-        return dgm1, dgm2
+        return model
 
-def LISM_optimization(model, fast=False, use_reg=True, alpha=1, lambda_=1, sigma=0.001):
 
-    lr = tf.keras.optimizers.schedules.InverseTimeDecay(initial_learning_rate=0.5, decay_steps=10, decay_rate=.01)
-    optimizer = tf.keras.optimizers.SGD(learning_rate=lr)
+    def cub_persistence(self, p, I, J, dim):
 
-    optimization = {'losses':[],
-                                'amplitudes':[],
-                                'projections':[model.p.numpy()],
-                                'diagrams':[]
-    }
+        model = CubicalModel_ISM(p, I, J, dim=dim, card=self.card)
 
-    for epoch in range(50+1):
+        return model
 
-        if epoch > 5:
-            diff = tf.abs(tf.norm(optimization['projections'][epoch])-tf.norm(optimization['projections'][epoch-1]))
-                
-            if diff < 0.0005:
+    def optim(self, model, fast=False, use_reg=True, alpha=1, lambda_=1, sigma=0.001):
+
+        lr = tf.keras.optimizers.schedules.InverseTimeDecay(initial_learning_rate=0.5, decay_steps=10, decay_rate=.01)
+        optimizer = tf.keras.optimizers.SGD(learning_rate=lr)
+
+        optimization = {'losses':[],
+                                    'amplitudes':[],
+                                    'projections':[model.p.numpy()],
+                                    'diagrams':[]
+        }
+
+        for epoch in range(50+1):
+
+            if epoch > 5:
+                diff = tf.abs(tf.norm(optimization['projections'][epoch])-tf.norm(optimization['projections'][epoch-1]))
                     
-                p_opt = model.p/tf.norm(model.p)
+                if diff < 0.0005:
+                        
+                    p_opt = model.p/tf.norm(model.p)
 
-                model.p = p_opt
+                    model.p = p_opt
 
-                dgm1, dgm2 = model.call()
+                    dgm1, dgm2 = model.call()
 
-                amplitude = alpha * tf.sqrt(wasserstein_distance(dgm1, dgm2, order=2, enable_autodiff=True))
-                loss = - amplitude + lambda_*(tf.norm(model.p)-1)**2
+                    amplitude = alpha * tf.sqrt(wasserstein_distance(dgm1, dgm2, order=2, enable_autodiff=True))
+                    loss = - amplitude + lambda_*(tf.norm(model.p)-1)**2
 
-                optimization['projections'].append(model.p.numpy())
-                optimization['losses'].append(loss.numpy())
-                optimization['amplitudes'].append(amplitude.numpy())
-                optimization['diagrams'].append((dgm1,dgm2))
+                    optimization['projections'].append(model.p.numpy())
+                    optimization['losses'].append(loss.numpy())
+                    optimization['amplitudes'].append(amplitude.numpy())
+                    optimization['diagrams'].append((dgm1,dgm2))
+                    
+                    break
+
+            with tf.GradientTape() as tape:
                 
-                break
-
-        with tf.GradientTape() as tape:
+                dgm1, dgm2 = model.call()
+                
+                if use_reg:
+                    amplitude = alpha * tf.sqrt(wasserstein_distance(dgm1, dgm2, order=2, enable_autodiff=True))
+                    loss = - amplitude + lambda_*(tf.norm(model.p)-1)**2
+                else:
+                    amplitude = alpha * tf.sqrt(wasserstein_distance(dgm1, dgm2, order=2, enable_autodiff=True))
+                    loss = - amplitude 
+                
+            gradients = tape.gradient(loss, model.trainable_variables)
             
-            dgm1, dgm2 = model.call()
-            
-            if use_reg:
-                amplitude = alpha * tf.sqrt(wasserstein_distance(dgm1, dgm2, order=2, enable_autodiff=True))
-                loss = - amplitude + lambda_*(tf.norm(model.p)-1)**2
-            else:
-                amplitude = alpha * tf.sqrt(wasserstein_distance(dgm1, dgm2, order=2, enable_autodiff=True))
-                loss = - amplitude 
-            
-        gradients = tape.gradient(loss, model.trainable_variables)
-        
-        np.random.seed(epoch)
-        # gradients = [tf.convert_to_tensor(gradients[0])]
-        gradients[0] = gradients[0] + np.random.normal(loc=0., scale=sigma, size=gradients[0].shape)
-        optimizer.apply_gradients(zip(gradients, model.trainable_variables))
+            np.random.seed(epoch)
+            # gradients = [tf.convert_to_tensor(gradients[0])]
+            gradients[0] = gradients[0] + np.random.normal(loc=0., scale=sigma, size=gradients[0].shape)
+            optimizer.apply_gradients(zip(gradients, model.trainable_variables))
 
-        optimization['projections'].append(model.p.numpy())
-        optimization['losses'].append(loss.numpy())
-        optimization['amplitudes'].append(amplitude.numpy())
-        optimization['diagrams'].append((dgm1,dgm2))
+            optimization['projections'].append(model.p.numpy())
+            optimization['losses'].append(loss.numpy())
+            optimization['amplitudes'].append(amplitude.numpy())
+            optimization['diagrams'].append((dgm1,dgm2))
 
-    if fast:
-        return amplitude.numpy()
-    else:
+        if fast:
+            return amplitude.numpy()
+        else:
+            return optimization
+
+
+    def distance_matrix(self, dim):
+
+        N = self.meta_data[0].shape[0]
+        data = self.meta_data[0]
+
+        if self.object==0:
+
+            method = self.simp_persistence
+
+        elif self.object==1:
+
+            method = self.cub_persistence
+
+        D = np.zeros((N,N))
+
+        for i in tqdm(range(N)):
+            for j in range(N):
+                if i<j:
+                    
+                    multifilt1 = data[i]
+                    multifilt2 = data[j]
+                    # random intial projection 
+                    theta = np.random.rand()*np.pi/2
+                    p_ = np.array([np.cos(theta), np.sin(theta)], dtype=np.float32).reshape(2,1)
+                    p = tf.Variable(initial_value=p_, trainable=True, dtype = tf.float32)
+
+                    # converting multifiltrations to tensorflow non-trainable variables
+                    m1 = tf.Variable(initial_value=multifilt1, trainable=False, dtype=tf.float32)
+                    m2 = tf.Variable(initial_value=multifilt2, trainable=False, dtype=tf.float32)
+
+                    # initializing the input-model
+                    model = method(p, m1, m2, dim)
+
+                    dist = self.optim(model, fast=True)
+                    D[i,j] = dist
+
+        D += np.transpose(D)
+
+        return D
+
+    def single_distance(self, dim=0):
+
+        data = self.meta_data[0]
+        N = data.shape[0]
+
+        if N != 2:
+            print("Please enter data consisting of only two multi-filtrations. None is returned.")
+            return None
+
+        if self.object==0:
+
+            method = self.simp_persistence
+
+        elif self.object==1:
+
+            method = self.cub_persistence
+
+         # random intial projection 
+        theta = np.random.rand()*np.pi/2
+        p_ = np.array([np.cos(theta), np.sin(theta)], dtype=np.float32).reshape(2,1)
+        p = tf.Variable(initial_value=p_, trainable=True, dtype = tf.float32)
+
+        # converting multifiltrations to tensorflow non-trainable variables
+        m1 = tf.Variable(initial_value=data[0], trainable=False, dtype=tf.float32)
+        m2 = tf.Variable(initial_value=data[1], trainable=False, dtype=tf.float32)
+
+        # initializing the input-model
+        model = method(p, m1, m2, dim)
+
+        optimization = self.optim(model, fast=False)
+
         return optimization
+
 
 
 def grid_search(I, J, plotting=False, dim=1, card=50):
@@ -195,51 +279,6 @@ def grid_search_amp(I, dim=1, card=50):
     amp = max(amplitudes)
     
     return amp
-
-
-        
-
-class CubicalModel_ISM_torch(Function):
-
-    @staticmethod    
-    def forward(p, I, J, dim=1, card=256):
-
-        # first image I = (I1,I2)
-        # second image J = (J1,J2)
-
-        Xp = torch.tensordot(I,p,1).reshape([28,28])
-        Yp = torch.tensor(J,p,1).reshape([28,28])
-
-        d, c, D = dim, card, len(Xp.shape)
-        XX = torch.tensor(Xp).reshape([1, Xp.shape[0], Xp.shape[1]])
-        YY = torch.tensor(Yp).reshape([1, Yp.shape[0], Yp.shape[1]])
-
-        
-        def CbTF(X,d1,c1):
-           X_numpy = X.detach().numpy()
-           return torch.tensor(Cubical(X_numpy,d1,c1), dtype = torch.int8).reshape(2*D*c)
-     
-       # Compute pixels associated to positive and negative simplices
-       # Don't compute gradient for this operation
-      
-        inds1 = CbTF(XX, d, c)
-        inds2 = CbTF(YY, d, c)
-    
-        # Get persistence diagram by simply picking the corresponding entries in the image
-        dgm1 = torch.tensor(tf.gather_nd(Xp, torch.tensor(inds1).reshape([-1,D]))).reshape([-1,2])
-        dgm2 = torch.tensor(tf.gather_nd(Yp, torch.tensor(inds2).reshape([-1,D]))).reshape([-1,2])
-        return dgm1, dgm2
-
-    
-    @staticmethod    
-    def backward(p, I, J, dim=1, card=256):
-
-        dgm1, dgm2 = forward(p, I, J, dim, card)
-
-        return dgm1.grad, dgm2.grad
-
-
-
 
 
 def fast_grid_search(I, J, dim=1, card=50):

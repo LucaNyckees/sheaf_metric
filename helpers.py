@@ -1,3 +1,4 @@
+from turtle import position
 import numpy as np
 from sklearn.preprocessing import binarize
 from tqdm import tqdm
@@ -14,12 +15,12 @@ from sklearn.cluster                      import KMeans
 import plotly.figure_factory as ff
 from plotly.colors import n_colors
 import plotly.express as px
+import networkx as nx
 
-def computation_time(N, single_distance_time):
 
-    total_entries = N*(N-1)/2
-    computation_time = total_entries * single_distance_time
-    print("Computation of distance matrix will take approx. {} minutes.".format(computation_time/60))
+############################
+# PLOTS AND MULTIFILTRATIONS
+############################
 
 def plot_bifiltration(plot1,plot2):
 
@@ -47,8 +48,8 @@ def plot_optim(optimization, show_diagrams=False):
     amplitudes = optimization['amplitudes']
     n_epochs = len(amplitudes)
 
-    cmap1 = n_colors('rgb(160, 100, 255)', 'rgb(50, 140, 140)', n_epochs, colortype = 'rgb')
-    cmap2 = n_colors('rgb(200, 240, 50)', 'rgb(160, 100, 255)', n_epochs+1, colortype = 'rgb')
+    cmap2 = n_colors('rgb(80, 208, 255)', 'rgb(160, 32, 255)', n_epochs+1, colortype = 'rgb')
+    cmap1 = n_colors('rgb(80, 208, 255)', 'rgb(160, 32, 255)', n_epochs, colortype = 'rgb')
 
     if show_diagrams:
         nb_cols = 4
@@ -61,8 +62,6 @@ def plot_optim(optimization, show_diagrams=False):
     epochs = list(range(n_epochs))
     losses = optimization['losses']
     projections = optimization['projections']
-    proj1 = [float(p[0]) for p in projections]
-    proj2 = [float(p[1]) for p in projections]
 
     norms = [tf.norm(p) for p in projections]
     angles = np.arange(0, math.pi/2, 0.01)
@@ -73,19 +72,18 @@ def plot_optim(optimization, show_diagrams=False):
             color='skyblue'
                 )),row=1,col=1)
     fig.add_trace(go.Scatter(x=epochs,y=amplitudes,mode="lines",name="amplitude",marker=dict(
-            color='lightcoral'
+            color='rgb(160, 32, 255)'
                 )),row=1,col=1)
     fig.add_trace(go.Scatter(x=cosines,y=sines,showlegend=False,marker=dict(
             color='powderblue'
                 )),row=1,col=2)
-    #fig.add_trace(go.Scatter(x=proj1,y=proj2, mode="markers",name="projection"),row=1,col=2)
     for i, p in enumerate(projections):
-            fig.add_trace(go.Scatter(x=[float(p[0])],y=[float(p[1])],mode="markers",name="projection",showlegend=False,
+            a = float(p[0])/np.linalg.norm(p)
+            b = float(p[1])/np.linalg.norm(p)
+            fig.add_trace(go.Scatter(x=[a],y=[b],mode="markers",name="projection",showlegend=False,
             marker=dict(
             color=cmap2[i]
                 )),row=1,col=2)
-    #fig.add_trace(go.Scatter(x=epochs,y=proj1,mode="lines",name="p1"),row=1,col=2)
-    #fig.add_trace(go.Scatter(x=epochs,y=proj2,mode="lines",name="p2"),row=1,col=2)
     fig.add_trace(go.Scatter(x=epochs,y=norms,mode="lines",name="norm of p",marker=dict(
             color='plum'
                 )),row=1,col=3)
@@ -102,7 +100,10 @@ def plot_optim(optimization, show_diagrams=False):
         d = max([max(tuple[0][:,1]) for tuple in dgms])
         e = (d-b)/10
 
-        fig.add_trace(go.Scatter(x=[b-e,d+e],y=[b-e,d+e],mode="lines",name="diagonal",showlegend=False),row=1,col=4)
+        fig.add_trace(go.Scatter(x=[b-e,d+e],y=[b-e,d+e],mode="lines",name="diagonal",showlegend=False, marker=dict(
+            color='rgb(50, 129, 255)'
+                )),row=1,col=4)
+
         fig.update_xaxes(title_text="birth", row=1, col=4)
         for i, tuple in enumerate(dgms):
             fig.add_trace(go.Scatter(x=tuple[0][:,0],y=tuple[0][:,1],mode="markers",name="(b,d)",showlegend=False,
@@ -204,19 +205,6 @@ def wasserstein_matrix(images, train_y, dim, filtration, param):
 
     
 
-def wass_amplitudes(images, alpha, dim=1):
-
-    A = []
-
-    for I in tqdm(images):
-
-        cc = gd.CubicalComplex(dimensions=I.shape, top_dimensional_cells=I.flatten())
-        dgm = np.array([p[1] for p in cc.persistence() if p[0]==dim])
-
-        A.append(alpha * np.square(wasserstein_distance(dgm, [], order=2)))
-
-    return np.array(A)
-
 def get_accuracy(D, N, train_y):
 
     kmeans = KMeans(n_clusters=2, random_state=0).fit(D)
@@ -262,6 +250,8 @@ def dist_matrix_hist(D, N, train_y, method):
 
 def plot_optim_pc(optimization,X,Y):
 
+    "Point-cloud optimization visual summary."
+
     m = max(max(Y[:, 0]),max(Y[:, 1]))
     n = X.shape[0]
 
@@ -300,16 +290,6 @@ def plot_optim_pc(optimization,X,Y):
         color=cmap2[i],
         size=4
             )),row=1,col=2)
-        """fig.add_trace(go.Scatter(x=[i for j in range(n_epochs)],y=Xp, mode="markers",name="Xp=f(t)",showlegend=show,
-        marker=dict(
-        color=cmap2[i],
-        size=4
-            )),row=1,col=3)
-        fig.add_trace(go.Scatter(x=[i for j in range(n_epochs)],y=Yp, mode="markers",name="Yp=f(t)",showlegend=show,
-        marker=dict(
-        color=cmap2[i],
-        size=4
-            )),row=1,col=4)"""
         fig.add_trace(go.Scatter(x=X[:,0],y=Xp, mode="markers",name="Xp=f(x)",showlegend=show,
         marker=dict(
         color=cmap2[i],
@@ -326,5 +306,162 @@ def plot_optim_pc(optimization,X,Y):
     fig.update_layout(yaxis2 = dict(range=[-m-1, m+1]))
     fig.update_layout(yaxis3 = dict(range=[-2, 2]))
     fig.update_layout(yaxis4 = dict(range=[-m-1, m+1]))
+    fig.show()
+
+
+
+def is_center_of_3_path(G, node, layers):
+
+    count1 = 0
+    count2 = 0
+    l = layers[node]
+
+    if l>0 and l<4:
+
+        for j in G.neighbors(node):
+
+            if layers[j]==l-1:
+                count1+=1
+            if layers[j]==l+1:
+                count2+=1
+            if count1>0 and count2>0:
+                return True
+
+    elif l==0:
+
+        for j in G.neighbors(node):
+
+            if layers[j]==l+1:
+                count2+=1
+            if count2>0:
+                return True
+
+    elif l==4:
+
+        for j in G.neighbors(node):
+
+            if layers[j]==l-1:
+                count1+=1
+            if count1>0:
+                return True
+
+
+    return False
+
+
+def connected_geometric_network(simplex_list, layers):
+    
+    E = [tuple(s) for s in simplex_list if len(s)==2]
+
+    H = nx.Graph()
+    H.add_edges_from(E)
+
+    for _ in range(5):
+
+        nodes = [node for node in H.nodes() if is_center_of_3_path(H, node, layers)]
+        H = nx.Graph()
+        H.add_nodes_from(nodes)
+        H.add_edges_from([edge for edge in E if (edge[0] in nodes and edge[1] in nodes)])
+        
+    interesting_nodes = list(H.nodes())
+
+    n0 = len([node for node in interesting_nodes if layers[node]==0])
+    n1 = len([node for node in interesting_nodes if layers[node]==1])
+    n2 = len([node for node in interesting_nodes if layers[node]==2])
+    n3 = len([node for node in interesting_nodes if layers[node]==3])
+    n4 = len([node for node in interesting_nodes if layers[node]==4])
+
+    heights = np.hstack((np.linspace(-1,1,n0), np.linspace(-1,1,n1), np.linspace(-1,1,n2), np.linspace(-1,1,n3), np.linspace(-1,1,n4)))
+
+    nodes = [{'node':node,'layer':layers[node]} for node in interesting_nodes]
+
+    sorted_nodes = sorted(nodes, key=lambda d: d['layer']) 
+
+    positional_nodes = [(node['node'],{'pos':[node['layer'],heights[sorted_nodes.index(node)]]}) for node in sorted_nodes]
+    ouee = [node[0] for node in positional_nodes]
+
+    edges = [edge for edge in E if (edge[0] in ouee and edge[1] in ouee)]
+
+    G = nx.Graph()
+    G.add_nodes_from(positional_nodes)
+    G.add_edges_from(edges)
+
+    return G
+
+
+    
+def plotly_geometric_network(G):
+        
+    edge_x = []
+    edge_y = []
+    for edge in G.edges():
+        x0, y0 = G.nodes[edge[0]]['pos']
+        x1, y1 = G.nodes[edge[1]]['pos']
+        edge_x.append(x0)
+        edge_x.append(x1)
+        edge_x.append(None)
+        edge_y.append(y0)
+        edge_y.append(y1)
+        edge_y.append(None)
+
+    edge_trace = go.Scatter(
+    x=edge_x, y=edge_y,
+    line=dict(width=0.5, color='#888'),
+    hoverinfo='none',
+    mode='lines')
+
+    node_x = []
+    node_y = []
+    for node in G.nodes():
+        x, y = G.nodes[node]['pos']
+        node_x.append(x)
+        node_y.append(y)
+
+    node_trace = go.Scatter(
+    x=node_x, y=node_y,
+    mode='markers',
+    hoverinfo='text',
+    marker=dict(
+        showscale=True,
+        # colorscale options
+        #'Greys' | 'YlGnBu' | 'Greens' | 'YlOrRd' | 'Bluered' | 'RdBu' |
+        #'Reds' | 'Blues' | 'Picnic' | 'Rainbow' | 'Portland' | 'Jet' |
+        #'Hot' | 'Blackbody' | 'Earth' | 'Electric' | 'Viridis' |
+        colorscale='Blues',
+        reversescale=True,
+        color=[],
+        size=6,
+        colorbar=dict(
+            thickness=15,
+            title='Node Connections',
+            xanchor='left',
+            titleside='right'
+        ),
+        line_width=0.3))
+
+    node_adjacencies = []
+    node_text = []
+    for node, adjacencies in enumerate(G.adjacency()):
+        node_adjacencies.append(len(adjacencies[1]))
+        node_text.append('# of connections: '+str(len(adjacencies[1])))
+
+    node_trace.marker.color = node_adjacencies
+    node_trace.text = node_text
+
+    fig = go.Figure(data=[edge_trace, node_trace],
+                layout=go.Layout(
+                title='<br>Neural network structure summary',
+                titlefont_size=16,
+                showlegend=False,
+                hovermode='closest',
+                margin=dict(b=20,l=5,r=5,t=40),
+                annotations=[ dict(
+                    text='',
+                    showarrow=False,
+                    xref="paper", yref="paper",
+                    x=0.005, y=-0.002 ) ],
+                xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                yaxis=dict(showgrid=False, zeroline=False, showticklabels=False))
+                )
     fig.show()
 
