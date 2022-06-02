@@ -16,6 +16,9 @@ import plotly.figure_factory as ff
 from plotly.colors import n_colors
 import plotly.express as px
 import networkx as nx
+from LISM import fast_grid_search, pipeline
+import n_sphere
+from sklearn.manifold import MDS
 
 
 ############################
@@ -47,6 +50,8 @@ def plot_optim(optimization, show_diagrams=False):
 
     amplitudes = optimization['amplitudes']
     n_epochs = len(amplitudes)
+    projections = optimization['projections']
+    n_features = projections[-1].shape[0]
 
     cmap2 = n_colors('rgb(80, 208, 255)', 'rgb(160, 32, 255)', n_epochs+1, colortype = 'rgb')
     cmap1 = n_colors('rgb(80, 208, 255)', 'rgb(160, 32, 255)', n_epochs, colortype = 'rgb')
@@ -56,12 +61,18 @@ def plot_optim(optimization, show_diagrams=False):
     else:
         nb_cols = 3
 
-    fig = make_subplots(1,nb_cols)
+    if n_features == 3:
+        
+        fig = make_subplots(rows=1,cols=nb_cols,
+                        specs=[[{"type": 'xy'}, {"type": 'scene'}, {"type": "xy"}, {"type": 'xy'}]])
+
+    else:
+
+        fig = make_subplots(rows=1,cols=nb_cols)
 
     
     epochs = list(range(n_epochs))
     losses = optimization['losses']
-    projections = optimization['projections']
 
     norms = [tf.norm(p) for p in projections]
     angles = np.arange(0, math.pi/2, 0.01)
@@ -74,16 +85,44 @@ def plot_optim(optimization, show_diagrams=False):
     fig.add_trace(go.Scatter(x=epochs,y=amplitudes,mode="lines",name="amplitude",marker=dict(
             color='rgb(160, 32, 255)'
                 )),row=1,col=1)
-    fig.add_trace(go.Scatter(x=cosines,y=sines,showlegend=False,marker=dict(
-            color='powderblue'
-                )),row=1,col=2)
-    for i, p in enumerate(projections):
-            a = float(p[0])/np.linalg.norm(p)
-            b = float(p[1])/np.linalg.norm(p)
-            fig.add_trace(go.Scatter(x=[a],y=[b],mode="markers",name="projection",showlegend=False,
-            marker=dict(
-            color=cmap2[i]
-                )),row=1,col=2)
+    if n_features == 2:
+
+        fig.add_trace(go.Scatter(x=cosines,y=sines,showlegend=False,marker=dict(
+                color='powderblue'
+                    )),row=1,col=2)
+        for i, p in enumerate(projections):
+                a = float(p[0])/np.linalg.norm(p)
+                b = float(p[1])/np.linalg.norm(p)
+                fig.add_trace(go.Scatter(x=[a],y=[b],mode="markers",name="projection",showlegend=False,
+                marker=dict(
+                color=cmap2[i]
+                    )),row=1,col=2)
+    elif n_features == 3:
+
+        phis = np.arange(0, math.pi/2, 0.1)
+        thetas = np.arange(0, math.pi/2, 0.1)
+
+        for phi in phis:
+            for theta in thetas:
+
+                x = np.array([1,phi,theta])
+                v = n_sphere.convert_rectangular(x)
+                fig.add_trace(go.Scatter3d(x=[v[0]], y=[v[1]], z=[v[2]], mode="markers", showlegend=False, marker=dict(
+                color='blue',
+                size=1
+                    )),row=1,col=2)
+        
+        for i, p in enumerate(projections):
+                a = float(p[0])/np.linalg.norm(p)
+                b = float(p[1])/np.linalg.norm(p)
+                c = float(p[2])/np.linalg.norm(p)
+                fig.add_trace(go.Scatter3d(x=[a], y=[b], z=[c],
+                                   mode='markers',name="projection",showlegend=False,
+                marker=dict(
+                color=cmap2[i],
+                size=3
+                    )),row=1,col=2)
+    
     fig.add_trace(go.Scatter(x=epochs,y=norms,mode="lines",name="norm of p",marker=dict(
             color='plum'
                 )),row=1,col=3)
@@ -121,24 +160,27 @@ def plot_optim(optimization, show_diagrams=False):
 
 
 
-def bifiltration(img, center=[13,13], direction=[0,1]):
+def multifiltration(img, filtrations):
+
+    n_features = len(filtrations)
+    n_pixels = img.shape[0]
 
     binarizer = Binarizer(threshold=0.4)
-    radial_filtration = RadialFiltration(center=np.array(center))
-    height_filtration = HeightFiltration(direction=np.array(direction))
 
     I_bin = binarizer.fit_transform(img)
-    I_rad = radial_filtration.fit_transform(I_bin.reshape(1,28,28)).reshape(28,28)
-    I_height = height_filtration.fit_transform(I_bin.reshape(1,28,28)).reshape(28,28)
-    I_rad = I_rad/np.amax(I_rad)
-    I_height = I_height/np.amax(I_height)
+    filters = []
     
-    I_ = np.array([M.reshape(2,28).T for M in np.split(np.stack((I_rad,I_height),axis=1),28)])
-    I = tf.Variable(initial_value=np.array(I_, dtype=np.float32), trainable=False)
+    for filt in filtrations:
 
-    plotting_tuple = (img, I_bin, I_rad, I_height)
+        filter = filt.fit_transform(I_bin.reshape(1,n_pixels,n_pixels)).reshape(n_pixels,n_pixels)
+        filter = filter/np.amax(filter)
+        filters.append(filter)
+    
+    I_ = np.array([M.reshape(n_features,28).T for M in np.split(np.stack(tuple(filters),axis=1),28)],dtype=np.float32)
 
-    return I, plotting_tuple
+    #plotting_tuple = (img, I_bin, I_rad, I_height)
+    
+    return I_
 
 
 
@@ -163,7 +205,11 @@ def height_filtration(I, v = [1,0]):
     return I_height
 
 
-def wasserstein_matrix(images, train_y, dim, filtration, param):
+def wasserstein_matrix(images, train_y, dim, filtration):
+
+    if (len(images[0].shape)>2 and images[0].shape[-1]!=1):
+        print("The Wasserstein matrix computation works only for the case of 1-filtrations (n_features=1). Here, n_features={}.".format(images[0].shape[-1]))
+        return None
 
     N = len(images)
     labels = train_y[:N]
@@ -177,12 +223,9 @@ def wasserstein_matrix(images, train_y, dim, filtration, param):
     for i, img1 in tqdm(enumerate(images_bb)):
         for j, img2 in enumerate(images_bb):
             if i<j:
-                if filtration=="height":
-                    I = height_filtration(img1, param)
-                    J = height_filtration(img2, param)
-                elif filtration=="radial":
-                    I = radial_filtration(img1, param)
-                    J = radial_filtration(img2, param)
+
+                I = multifiltration(img1, [filtration])
+                J = multifiltration(img2, [filtration])
 
                 cc = gd.CubicalComplex(dimensions=I.shape, top_dimensional_cells=I.flatten())
                 pers = cc.persistence()
@@ -195,7 +238,32 @@ def wasserstein_matrix(images, train_y, dim, filtration, param):
                 dgm1 = np.array(pers1).reshape(len(pers1),2)
                 dgm2 = np.array(pers2).reshape(len(pers2),2)
                 
-                D[i,j] = np.sqrt(wasserstein_distance(dgm1, dgm2, order=2))
+                D[i,j] = wasserstein_distance(dgm1, dgm2, order=2)
+
+    D += np.transpose(D)
+
+    fig = px.imshow(D,height=470, width=470)
+
+    return D, fig, images_bb, labels_bb
+
+
+def sheaf_distance_matrix(images, train_y, step, dim, filtrations):
+
+    N = len(images)
+    labels = train_y[:N]
+    l = [{'image':images[i], 'label':labels[i]} for i in range(N)]
+    l_sorted = sorted(l, key=lambda d: d['label']) 
+    images_bb = np.array([l_sorted[i]['image'] for i in range(N)])
+    labels_bb = np.array([l_sorted[i]['label'] for i in range(N)])
+    
+    D = np.zeros((N,N))
+
+    for i, img1 in tqdm(enumerate(images_bb)):
+        for j, img2 in enumerate(images_bb):
+            if i<j:
+                I = multifiltration(img1, filtrations)
+                J = multifiltration(img2, filtrations)
+                D[i,j] = fast_grid_search(I,J, step, dim)
 
     D += np.transpose(D)
 
@@ -465,3 +533,162 @@ def plotly_geometric_network(G):
                 )
     fig.show()
 
+
+def MDS_analysis(matrices, labels_bb):
+
+    n = len(matrices)
+    m = len(set(labels_bb))
+
+    fig = make_subplots(rows=n,cols=1)
+
+    colors = ['mediumslateblue', 'mediumturquoise', 'yellowgreen', 'hotpink']
+    c = colors[:m]
+    legends = [True] + [False for _ in range(n-1)]
+
+    for j, D in enumerate(matrices):
+        
+        embedding = MDS(n_components=2, dissimilarity='precomputed')
+
+        MDS_ = embedding.fit_transform(D)
+
+        for i, digit in enumerate(set(labels_bb)):
+
+            mds = MDS_[labels_bb==digit]
+
+            fig.add_trace(go.Scatter(x=mds[:,0], y=mds[:,1], 
+                                     mode='markers', 
+                                     name=str(digit), 
+                                     showlegend=legends[j],
+                                     marker=dict(
+                                         color=c[i]
+                                    )), row=j+1, col=1)
+            
+
+    fig.update_layout(
+            title="Multi-dimensional scaling (MDS) of distance matrices",
+            legend_title="Digits",
+            height=900
+    )
+
+    fig.show()
+
+def heatmaps(matrices_tup):
+
+    m = matrices_tup[0].shape[0]
+    n = matrices_tup[0].shape[1]
+
+
+    imgs_ = np.vstack(matrices_tup).reshape(len(matrices_tup),m,n)
+    fig = px.imshow(imgs_, facet_col=0, facet_col_wrap=len(matrices_tup), color_continuous_scale=[[0.0, "rgb(165,0,38)"],
+                    [0.1111111111111111, "rgb(215,48,39)"],
+                    [0.2222222222222222, "rgb(244,109,67)"],
+                    [0.3333333333333333, "rgb(253,174,97)"],
+                    [0.4444444444444444, "rgb(254,224,144)"],
+                    [0.5555555555555556, "rgb(224,243,248)"],
+                    [0.6666666666666666, "rgb(171,217,233)"],
+                    [0.7777777777777778, "rgb(116,173,209)"],
+                    [0.8888888888888888, "rgb(69,117,180)"],
+                    [1.0, "rgb(49,54,149)"]])
+    fig.update_layout(height=400, width=800,title="Heat maps of distance matrices")
+    fig.show()
+
+def run_experiment(multifilt, images, labels):
+
+    matrices = []
+
+    for i, filt in enumerate(multifilt):
+
+        print("Computing Wasserstein matrix for filtration no.{}...".format(i+1))
+        D_1, fig_1, images_bb, labels_bb = wasserstein_matrix(images, labels, 1, filt)
+        D_0, fig_0, images_bb, labels_bb = wasserstein_matrix(images, labels, 0, filt)
+        D = np.maximum(D_1, D_0)
+
+        matrices.append(D)
+
+    print("Computing LISM matrix...")
+
+    if len(multifilt)==2:
+    
+        D_sheaf_1, fig_1, images_bb, labels_bb = sheaf_distance_matrix(images, labels, 0.1, 1, multifilt)
+        D_sheaf_0, fig_0, images_bb, labels_bb = sheaf_distance_matrix(images, labels, 0.1, 0, multifilt)
+
+    elif len(multifilt)>2:
+
+        meta_data = [np.array([multifiltration(img,multifilt) for img in images_bb])]
+
+        pipe_1 = pipeline(1, meta_data, 392, dims=[1])
+        pipe_0 = pipeline(1, meta_data, 392, dims=[0])
+        D_sheaf_1 = pipe_1.distance_matrix(1) 
+        D_sheaf_0 = pipe_0.distance_matrix(0) 
+
+    D_sheaf = np.maximum(D_sheaf_1, D_sheaf_0)
+
+    return tuple(matrices), D_sheaf, labels_bb
+
+
+
+def PE_coeff(l, L):
+
+    frac = l/L
+
+    return frac * np.log(frac)
+
+def PE(D):
+
+    L = np.sum(D[:,1]-D[:,0])
+    
+    S = [PE_coeff(l,L) for l in D[:,1]-D[:,0]]
+
+    return sum(S)
+
+
+def PE_analysis(images, filtration, dim=1):
+
+    vec = np.zeros((images.shape[0],1))
+
+    for i, img in enumerate(images):
+
+        I = multifiltration(img, [filtration])
+
+        cc = gd.CubicalComplex(dimensions=I.shape, top_dimensional_cells=I.flatten())
+        pers = cc.persistence()
+
+        pers1 = [[tuple[1][0],tuple[1][1]] for tuple in pers if tuple[0]==dim and tuple[1][1]!=np.inf]
+
+        D = np.array(pers1).reshape(len(pers1),2)
+
+        vec[i]=PE(D)
+    
+    return vec
+
+
+def PE_LISM_vector(images, multifilt, dim=1):
+
+
+    vec = np.zeros((images.shape[0],1))
+
+    angles = np.arange(0, math.pi/2, 0.01)
+    linear_forms = [np.array([math.cos(theta), math.sin(theta)]).reshape(2,1) for theta in angles ]
+
+    for i, img in tqdm(enumerate(images)):
+
+        A = []
+
+        I = multifiltration(img, multifilt)
+
+        for p in linear_forms:
+
+            Ip = np.tensordot(I,p,1)
+
+            cc = gd.CubicalComplex(dimensions=Ip.shape, top_dimensional_cells=Ip.flatten())
+            pers = cc.persistence()
+
+            pers1 = [[tuple[1][0],tuple[1][1]] for tuple in pers if tuple[0]==dim and tuple[1][1]!=np.inf]
+
+            D = np.array(pers1).reshape(len(pers1),2)
+
+            A.append(PE(D))
+
+        vec[i]=min(A)
+    
+    return vec

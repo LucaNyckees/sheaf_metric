@@ -8,6 +8,7 @@ from gudhi.wasserstein                    import wasserstein_distance
 import plotly.graph_objects as go
 from tqdm import tqdm
 from difftda import Cubical
+import n_sphere
 
 class pipeline():
 
@@ -25,7 +26,7 @@ class pipeline():
                 is a np.array of shape [N, n_nodes, n_features]).
 
                 (2) if object==1, meta_data=[data], a np.array of shape
-                [N, n_pixels, p_pixels] encoding N images. 
+                [N, n_pixels, p_pixels, n_features] encoding N images. 
 
             card (int): cardinality of persistence diagram (e.g. nb_nodes)
 
@@ -66,6 +67,7 @@ class pipeline():
         }
 
         for epoch in range(50+1):
+
 
             if epoch > 5:
                 diff = tf.abs(tf.norm(optimization['projections'][epoch])-tf.norm(optimization['projections'][epoch-1]))
@@ -121,6 +123,7 @@ class pipeline():
 
         N = self.meta_data[0].shape[0]
         data = self.meta_data[0]
+        n_features = data.shape[-1]
 
         if self.object==0:
 
@@ -139,10 +142,9 @@ class pipeline():
                     multifilt1 = data[i]
                     multifilt2 = data[j]
                     # random intial projection 
-                    theta = np.random.rand()*np.pi/2
-                    p_ = np.array([np.cos(theta), np.sin(theta)], dtype=np.float32).reshape(2,1)
+                    x = np.hstack((np.array([1]),np.random.rand(n_features-2)*np.pi,np.random.rand(1)*np.pi*2))
+                    p_ = np.abs(n_sphere.convert_rectangular(x).reshape(n_features,1))
                     p = tf.Variable(initial_value=p_, trainable=True, dtype = tf.float32)
-
                     # converting multifiltrations to tensorflow non-trainable variables
                     m1 = tf.Variable(initial_value=multifilt1, trainable=False, dtype=tf.float32)
                     m2 = tf.Variable(initial_value=multifilt2, trainable=False, dtype=tf.float32)
@@ -157,10 +159,17 @@ class pipeline():
 
         return D
 
+    def entropy_vector(self, dim=0):
+
+        return 0
+
+        
+
     def single_distance(self, dim=0):
 
         data = self.meta_data[0]
         N = data.shape[0]
+        n_features = data.shape[-1]
 
         if N != 2:
             print("Please enter data consisting of only two multi-filtrations. None is returned.")
@@ -174,11 +183,11 @@ class pipeline():
 
             method = self.cub_persistence
 
-         # random intial projection 
-        theta = np.random.rand()*np.pi/2
-        p_ = np.array([np.cos(theta), np.sin(theta)], dtype=np.float32).reshape(2,1)
+        # random intial projection 
+        x = np.hstack((np.array([1]),np.random.rand(n_features-2)*np.pi,np.random.rand(1)*np.pi*2))
+        p_ = np.abs(n_sphere.convert_rectangular(x).reshape(n_features,1))
         p = tf.Variable(initial_value=p_, trainable=True, dtype = tf.float32)
-
+        
         # converting multifiltrations to tensorflow non-trainable variables
         m1 = tf.Variable(initial_value=data[0], trainable=False, dtype=tf.float32)
         m2 = tf.Variable(initial_value=data[1], trainable=False, dtype=tf.float32)
@@ -192,9 +201,9 @@ class pipeline():
 
 
 
-def grid_search(I, J, plotting=False, dim=1, card=50):
+def grid_search(I, J, step=0.01, plotting=False, dim=1, card=50):
     
-    angles = np.arange(0, math.pi/2, 0.01)
+    angles = np.arange(0, math.pi/2, step)
     linear_forms = [np.array([math.cos(theta), math.sin(theta)]).reshape(2,1) for theta in angles ]
 
     distances = []
@@ -252,9 +261,9 @@ def grid_search(I, J, plotting=False, dim=1, card=50):
 
 
 
-def grid_search_amp(I, dim=1, card=50):
+def grid_search_amp(I, step=0.01, dim=1, card=50):
     
-    angles = np.arange(0, math.pi/2, 0.01)
+    angles = np.arange(0, math.pi/2, step)
     linear_forms = [np.array([math.cos(theta), math.sin(theta)]).reshape(2,1) for theta in angles ]
 
     amplitudes = []
@@ -281,9 +290,13 @@ def grid_search_amp(I, dim=1, card=50):
     return amp
 
 
-def fast_grid_search(I, J, dim=1, card=50):
+def fast_grid_search(I, J, step = 0.01, dim=1):
+
+    if I.shape[-1]!=2:
+        print("The fast grid search method should only be applied for the case of bi-filtrations (n_features=2). Here, n_features={}.".format(I.shape[-1]))
+        return None
     
-    angles = np.arange(0, math.pi/2, 0.01)
+    angles = np.arange(0, math.pi/2, step)
     linear_forms = [np.array([math.cos(theta), math.sin(theta)]).reshape(2,1) for theta in angles ]
 
     distances = []
@@ -304,7 +317,7 @@ def fast_grid_search(I, J, dim=1, card=50):
         dgm1 = np.array(pers1).reshape(len(pers1),2)
         dgm2 = np.array(pers2).reshape(len(pers2),2)
         
-        distances.append(np.sqrt(wasserstein_distance(dgm1, dgm2, order=2)))
+        distances.append(wasserstein_distance(dgm1, dgm2, order=2))
 
     dist = max(distances)
     

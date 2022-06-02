@@ -125,6 +125,41 @@ class SimplexTreeModel_ISM(tf.keras.Model):
         dgm2 = tf.reshape(tf.gather_nd(fct2, inds2), [c,2]) 
         return dgm1, dgm2
 
+class SimplexTreeModel_ISM_K1K2(tf.keras.Model):
+
+    def __init__(self, p, F, G, stbase1="simplextree.txt", stbase2="simplextree.txt", dim=0, card=50):
+        super(SimplexTreeModel_ISM_K1K2, self).__init__()
+        self.p = p
+        self.F = F
+        self.G = G
+        self.dim = dim
+        self.card = card
+        self.st1 = stbase1
+        self.st2 = stbase2
+        
+    def call(self):
+        d, c = self.dim, self.card
+        st1, st2, fct1, fct2 = self.st1, self.st2, tf.tensordot(self.F,self.p,1), tf.tensordot(self.G,self.p,1)
+
+        # Turn STPers into a numpy function
+        SimplexTreeTF1 = lambda fct: tf.numpy_function(SimplexTree, 
+        [np.array([st1], dtype=str), fct, d, c], [tf.int32 for _ in range(2*c)])
+        SimplexTreeTF2 = lambda fct: tf.numpy_function(SimplexTree, 
+        [np.array([st2], dtype=str), fct, d, c], [tf.int32 for _ in range(2*c)])
+        
+        # Don't try to compute gradients for the vertex pairs
+        fcts1 = tf.reshape(fct1, [1, fct1.shape[0]])
+        fcts2 = tf.reshape(fct2, [1, fct2.shape[0]])
+        inds1 = tf.nest.map_structure(tf.stop_gradient, tf.map_fn(SimplexTreeTF1, 
+                                                                 fcts1, dtype=[tf.int32 for _ in range(2*c)]))
+        inds2 = tf.nest.map_structure(tf.stop_gradient, tf.map_fn(SimplexTreeTF2, 
+                                                                 fcts2, dtype=[tf.int32 for _ in range(2*c)]))
+        
+        # Get persistence diagram
+        dgm1 = tf.reshape(tf.gather_nd(fct1, inds1), [c,2]) 
+        dgm2 = tf.reshape(tf.gather_nd(fct2, inds2), [c,2]) 
+        return dgm1, dgm2
+
 
 
 
