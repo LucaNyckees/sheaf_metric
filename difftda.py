@@ -343,3 +343,8 @@ class CubicalModel_ISM(tf.keras.Model):
         dgm1 = tf.reshape(tf.gather_nd(Xp, tf.reshape(inds1, [-1,D])), [-1,2])
         dgm2 = tf.reshape(tf.gather_nd(Yp, tf.reshape(inds2, [-1,D])), [-1,2])
         return dgm1, dgm2
+
+
+
+
+

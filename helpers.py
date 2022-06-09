@@ -1,163 +1,23 @@
-from turtle import position
 import numpy as np
-from sklearn.preprocessing import binarize
 from tqdm import tqdm
 import gudhi as gd
 from gudhi.wasserstein import wasserstein_distance
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-import tensorflow as tf
 import math
 from gtda.images import Binarizer
-from gtda.images import RadialFiltration
-from gtda.images import HeightFiltration
 from sklearn.cluster                      import KMeans
-import plotly.figure_factory as ff
-from plotly.colors import n_colors
 import plotly.express as px
 import networkx as nx
-from LISM import fast_grid_search, pipeline
+from LISM import fast_grid_search, pipeline, fast_optim
+from difftda import CubicalModel_ISM, SimplexTreeModel_ISM_K1K2
+import tensorflow as tf
 import n_sphere
-from sklearn.manifold import MDS
+import copy
+from itertools import permutations
 
 
-############################
-# PLOTS AND MULTIFILTRATIONS
-############################
-
-def plot_bifiltration(plot1,plot2):
-
-    imgs_ = np.vstack((plot1,plot2)).reshape(8,28,28)
-    fig = px.imshow(imgs_, facet_col=0, facet_col_wrap=4)
-    fig.update_layout(height=400, width=800,title="Illustrating the filtrations")
-    names = ["original image", "binarized filtration", "radial filtration", "height filtration"]
-    for i, name in enumerate(names):
-        fig.layout.annotations[i]['text'] = name
-    fig.show()
-
-def plot_optim_filtration(optimization, I, J):
-
-    p_opt = optimization['projections'][-1]
-    I_opt = tf.reshape(tf.tensordot(I,p_opt,1),shape=[28,28])
-    J_opt = tf.reshape(tf.tensordot(J,p_opt,1),shape=[28,28])
-    imgs_opt  = np.vstack((I_opt,J_opt)).reshape(2,28,28)
-    fig = px.imshow(imgs_opt, facet_col=0, facet_col_wrap=2)
-    fig.update_layout(height=290, width=600, title="Optimal LISM arguments (optimized bifiltrations)")
-    fig.show()
-
-
-def plot_optim(optimization, show_diagrams=False):
-
-    amplitudes = optimization['amplitudes']
-    n_epochs = len(amplitudes)
-    projections = optimization['projections']
-    n_features = projections[-1].shape[0]
-
-    cmap2 = n_colors('rgb(80, 208, 255)', 'rgb(160, 32, 255)', n_epochs+1, colortype = 'rgb')
-    cmap1 = n_colors('rgb(80, 208, 255)', 'rgb(160, 32, 255)', n_epochs, colortype = 'rgb')
-
-    if show_diagrams:
-        nb_cols = 4
-    else:
-        nb_cols = 3
-
-    if n_features == 3:
-        
-        fig = make_subplots(rows=1,cols=nb_cols,
-                        specs=[[{"type": 'xy'}, {"type": 'scene'}, {"type": "xy"}, {"type": 'xy'}]])
-
-    else:
-
-        fig = make_subplots(rows=1,cols=nb_cols)
-
-    
-    epochs = list(range(n_epochs))
-    losses = optimization['losses']
-
-    norms = [tf.norm(p) for p in projections]
-    angles = np.arange(0, math.pi/2, 0.01)
-    cosines = list(map(np.cos,angles))
-    sines = list(map(np.sin,angles))
-
-    fig.add_trace(go.Scatter(x=epochs,y=losses,mode="lines",name="loss",marker=dict(
-            color='skyblue'
-                )),row=1,col=1)
-    fig.add_trace(go.Scatter(x=epochs,y=amplitudes,mode="lines",name="amplitude",marker=dict(
-            color='rgb(160, 32, 255)'
-                )),row=1,col=1)
-    if n_features == 2:
-
-        fig.add_trace(go.Scatter(x=cosines,y=sines,showlegend=False,marker=dict(
-                color='powderblue'
-                    )),row=1,col=2)
-        for i, p in enumerate(projections):
-                a = float(p[0])/np.linalg.norm(p)
-                b = float(p[1])/np.linalg.norm(p)
-                fig.add_trace(go.Scatter(x=[a],y=[b],mode="markers",name="projection",showlegend=False,
-                marker=dict(
-                color=cmap2[i]
-                    )),row=1,col=2)
-    elif n_features == 3:
-
-        phis = np.arange(0, math.pi/2, 0.1)
-        thetas = np.arange(0, math.pi/2, 0.1)
-
-        for phi in phis:
-            for theta in thetas:
-
-                x = np.array([1,phi,theta])
-                v = n_sphere.convert_rectangular(x)
-                fig.add_trace(go.Scatter3d(x=[v[0]], y=[v[1]], z=[v[2]], mode="markers", showlegend=False, marker=dict(
-                color='blue',
-                size=1
-                    )),row=1,col=2)
-        
-        for i, p in enumerate(projections):
-                a = float(p[0])/np.linalg.norm(p)
-                b = float(p[1])/np.linalg.norm(p)
-                c = float(p[2])/np.linalg.norm(p)
-                fig.add_trace(go.Scatter3d(x=[a], y=[b], z=[c],
-                                   mode='markers',name="projection",showlegend=False,
-                marker=dict(
-                color=cmap2[i],
-                size=3
-                    )),row=1,col=2)
-    
-    fig.add_trace(go.Scatter(x=epochs,y=norms,mode="lines",name="norm of p",marker=dict(
-            color='plum'
-                )),row=1,col=3)
-
-    fig.update_xaxes(title_text="epoch", row=1, col=1)
-    fig.update_xaxes(title_text="p1", row=1, col=2)
-    fig.update_xaxes(title_text="epoch", row=1, col=3)
-    fig.update_yaxes(title_text="amplitude", row=1, col=1)
-
-    if show_diagrams:
-
-        dgms = optimization['diagrams']
-        b = min([min(tuple[0][:,0]) for tuple in dgms])
-        d = max([max(tuple[0][:,1]) for tuple in dgms])
-        e = (d-b)/10
-
-        fig.add_trace(go.Scatter(x=[b-e,d+e],y=[b-e,d+e],mode="lines",name="diagonal",showlegend=False, marker=dict(
-            color='rgb(50, 129, 255)'
-                )),row=1,col=4)
-
-        fig.update_xaxes(title_text="birth", row=1, col=4)
-        for i, tuple in enumerate(dgms):
-            fig.add_trace(go.Scatter(x=tuple[0][:,0],y=tuple[0][:,1],mode="markers",name="(b,d)",showlegend=False,
-            marker=dict(
-            color=cmap1[i]
-                )),row=1,col=4)
-
-    fig.update_layout(
-        title="Optimization summary for integral sheaf metric computation",
-        height=400,
-        width=1000,
-        legend_title="Curves"
-    )
-    fig.show()
-
+####################
+# MULTIFILTRATIONS
+####################
 
 
 def multifiltration(img, filtrations):
@@ -182,72 +42,48 @@ def multifiltration(img, filtrations):
     
     return I_
 
+####################
+# DISTANCE MATRICES
+####################
 
 
+def compute_distance_cub(I, J, dim, step=0.05):
 
-def radial_filtration(I, center=[6,13]):
-
-    binarizer = Binarizer(threshold=0.4)
-    radial_filtration = RadialFiltration(center=np.array(center))
-    I_bin = binarizer.fit_transform(I)
-    I_rad = radial_filtration.fit_transform(I_bin.reshape(1,28,28)).reshape(28,28)
-
-    return I_rad
-
-
-def height_filtration(I, v = [1,0]):
-
-    binarizer = Binarizer(threshold=0.4)
-    height_filtration = HeightFiltration(direction=np.array(v))
-    I_bin = binarizer.fit_transform(I)
-    I_height = height_filtration.fit_transform(I_bin.reshape(1,28,28)).reshape(28,28)
-
-    return I_height
-
-
-def wasserstein_matrix(images, train_y, dim, filtration):
-
-    if (len(images[0].shape)>2 and images[0].shape[-1]!=1):
-        print("The Wasserstein matrix computation works only for the case of 1-filtrations (n_features=1). Here, n_features={}.".format(images[0].shape[-1]))
-        return None
-
-    N = len(images)
-    labels = train_y[:N]
-    l = [{'image':images[i], 'label':labels[i]} for i in range(N)]
-    l_sorted = sorted(l, key=lambda d: d['label']) 
-    images_bb = np.array([l_sorted[i]['image'] for i in range(N)])
-    labels_bb = np.array([l_sorted[i]['label'] for i in range(N)])
-
-    D = np.zeros((N,N))
-
-    for i, img1 in tqdm(enumerate(images_bb)):
-        for j, img2 in enumerate(images_bb):
-            if i<j:
-
-                I = multifiltration(img1, [filtration])
-                J = multifiltration(img2, [filtration])
-
-                cc = gd.CubicalComplex(dimensions=I.shape, top_dimensional_cells=I.flatten())
-                pers = cc.persistence()
-                cc_ = gd.CubicalComplex(dimensions=J.shape, top_dimensional_cells=J.flatten())
-                pers_ = cc_.persistence()
-
-                pers1 = [[tuple[1][0],tuple[1][1]] for tuple in pers if tuple[0]==dim and tuple[1][1]!=np.inf]
-                pers2 = [[tuple[1][0],tuple[1][1]] for tuple in pers_ if tuple[0]==dim and tuple[1][1]!=np.inf]
+    if I.shape[-1]==2 and len(I.shape)==3:
         
-                dgm1 = np.array(pers1).reshape(len(pers1),2)
-                dgm2 = np.array(pers2).reshape(len(pers2),2)
-                
-                D[i,j] = wasserstein_distance(dgm1, dgm2, order=2)
+        return fast_grid_search(I, J, step, dim)
 
-    D += np.transpose(D)
+    elif I.shape[-1]>2 and len(I.shape)==3:
 
-    fig = px.imshow(D,height=470, width=470)
+        card=I.shape[0]*I.shape[0]//2
 
-    return D, fig, images_bb, labels_bb
+        # random initial projection 
+        x = np.hstack((np.array([1]),np.random.rand(I.shape[-1]-2)*np.pi,np.random.rand(1)*np.pi*2))
+        p_ = np.abs(n_sphere.convert_rectangular(x).reshape(I.shape[-1],1))
+        p = tf.Variable(initial_value=p_, trainable=True, dtype = tf.float32)
+
+        model = CubicalModel_ISM(p, I, J, dim=dim, card=card)
+
+        return fast_optim(model).numpy()
+
+    elif len(I.shape)==2 or (len(I.shape)==3 and I.shape[-1]==1):
+
+        cc = gd.CubicalComplex(dimensions=I.shape, top_dimensional_cells=I.flatten())
+        pers = cc.persistence()
+        cc_ = gd.CubicalComplex(dimensions=J.shape, top_dimensional_cells=J.flatten())
+        pers_ = cc_.persistence()
+
+        pers1 = [[tuple[1][0],tuple[1][1]] for tuple in pers if tuple[0]==dim and tuple[1][1]!=np.inf]
+        pers2 = [[tuple[1][0],tuple[1][1]] for tuple in pers_ if tuple[0]==dim and tuple[1][1]!=np.inf]
+
+        dgm1 = np.array(pers1).reshape(len(pers1),2)
+        dgm2 = np.array(pers2).reshape(len(pers2),2)
+
+        return wasserstein_distance(dgm1, dgm2, order=2)
 
 
-def sheaf_distance_matrix(images, train_y, step, dim, filtrations):
+
+def distance_matrix_cub(images, train_y, dim, filtrations, step=0.05):
 
     N = len(images)
     labels = train_y[:N]
@@ -255,15 +91,17 @@ def sheaf_distance_matrix(images, train_y, step, dim, filtrations):
     l_sorted = sorted(l, key=lambda d: d['label']) 
     images_bb = np.array([l_sorted[i]['image'] for i in range(N)])
     labels_bb = np.array([l_sorted[i]['label'] for i in range(N)])
-    
+
     D = np.zeros((N,N))
 
     for i, img1 in tqdm(enumerate(images_bb)):
         for j, img2 in enumerate(images_bb):
             if i<j:
+
                 I = multifiltration(img1, filtrations)
                 J = multifiltration(img2, filtrations)
-                D[i,j] = fast_grid_search(I,J, step, dim)
+                
+                D[i,j] = compute_distance_cub(I, J, dim, step)
 
     D += np.transpose(D)
 
@@ -271,110 +109,10 @@ def sheaf_distance_matrix(images, train_y, step, dim, filtrations):
 
     return D, fig, images_bb, labels_bb
 
-    
 
-def get_accuracy(D, N, train_y):
-
-    kmeans = KMeans(n_clusters=2, random_state=0).fit(D)
-    pred = kmeans.labels_
-    truth = train_y[:N]
-    res = pred - truth
-
-    nb = np.count_nonzero(res==0) + np.count_nonzero(res==-7)
-    nb_correct = max(nb, N-nb)
-
-    return nb_correct/N
-
-
-def dist_matrix_hist(D, N, train_y, method):
-
-    dists_same = []
-    dists_diff = []
-
-    methods = ['LISM', 'Wasserstein w/ radial filtration', 'Wasserstein w/ height filtration']
-
-    for i in range(N):
-        for j in range(N):
-            if i<j:
-
-                if train_y[:N][i]==train_y[:N][j]:
-                    dists_same.append(D[i,j])
-                else:
-                    dists_diff.append(D[i,j])
-
-    fig = make_subplots(1,2)
-
-    # Group data together
-    hist_data = [dists_same, dists_diff]
-
-    group_labels = ['same digit', 'diff digits']
-
-    # Create distplot with custom bin_size
-    fig = ff.create_distplot(hist_data, group_labels, bin_size=[.01, .01])
-    fig.update_layout(height=400, width=800, title_text= methods[method] +" distance" + " matrix distribution")
- 
-    fig.show()
-
-
-def plot_optim_pc(optimization,X,Y):
-
-    "Point-cloud optimization visual summary."
-
-    m = max(max(Y[:, 0]),max(Y[:, 1]))
-    n = X.shape[0]
-
-    fig = make_subplots(2,2)
-    fig.add_trace(go.Scatter(x = X[:, 0], y = X[:, 1], mode='markers', name = 'circle', marker=dict(size=2,color='mediumorchid')),row=1,col=1)
-    fig.add_trace(go.Scatter(x = Y[:, 0], y = Y[:, 1], mode='markers', name = 'ellipse', marker=dict(size=2, color='royalblue')),row=1,col=1)
-    fig.update_layout(
-            title="Optimization of point-cloud projection",
-            height=700,
-            width=800,
-            legend_title="Point-clouds",
-            xaxis_range=[-m,m],
-            yaxis_range=[-m,m]
-        )
-    projections = optimization['projections']
-    n_epochs = len(projections)
-
-    cmap2 = n_colors('rgb(160, 100, 255)', 'rgb(50, 150, 200)', n_epochs, colortype = 'rgb')
-
-    for i, p in enumerate(projections):
-
-        p = np.array(p).reshape(2,1)
-        Xp = np.tensordot(X,p,1).reshape(n)
-        Yp = np.tensordot(Y,p,1).reshape(n)
-
-        if i == 0:
-            show = True
-        else:
-            show = False
-        fig.add_trace(go.Scatter(x=[0,m],y=[0,float(p[1])/float(p[0])*m], mode="lines",name="projection",showlegend=show,
-        marker=dict(
-        color=cmap2[i]
-            )),row=1,col=1)
-        fig.add_trace(go.Scatter(x=Xp,y=Yp, mode="markers",name="Yp=f(Xp)",showlegend=show,
-        marker=dict(
-        color=cmap2[i],
-        size=4
-            )),row=1,col=2)
-        fig.add_trace(go.Scatter(x=X[:,0],y=Xp, mode="markers",name="Xp=f(x)",showlegend=show,
-        marker=dict(
-        color=cmap2[i],
-        size=4
-            )),row=2,col=1)
-        fig.add_trace(go.Scatter(x=Y[:,0],y=Yp, mode="markers",name="Yp=f(x)",showlegend=show,
-        marker=dict(
-        color=cmap2[i],
-        size=4
-            )),row=2,col=2)
-    fig.update_layout(xaxis2 = dict(range=[-m-1, m+1]))
-    fig.update_layout(xaxis3 = dict(range=[-2, 2]))
-    fig.update_layout(xaxis4 = dict(range=[-m-1, m+1]))
-    fig.update_layout(yaxis2 = dict(range=[-m-1, m+1]))
-    fig.update_layout(yaxis3 = dict(range=[-2, 2]))
-    fig.update_layout(yaxis4 = dict(range=[-m-1, m+1]))
-    fig.show()
+###############################
+# NEURAL NETWORKS CONNECTIVITY
+###############################
 
 
 
@@ -456,239 +194,249 @@ def connected_geometric_network(simplex_list, layers):
 
     return G
 
-
-    
-def plotly_geometric_network(G):
-        
-    edge_x = []
-    edge_y = []
-    for edge in G.edges():
-        x0, y0 = G.nodes[edge[0]]['pos']
-        x1, y1 = G.nodes[edge[1]]['pos']
-        edge_x.append(x0)
-        edge_x.append(x1)
-        edge_x.append(None)
-        edge_y.append(y0)
-        edge_y.append(y1)
-        edge_y.append(None)
-
-    edge_trace = go.Scatter(
-    x=edge_x, y=edge_y,
-    line=dict(width=0.5, color='#888'),
-    hoverinfo='none',
-    mode='lines')
-
-    node_x = []
-    node_y = []
-    for node in G.nodes():
-        x, y = G.nodes[node]['pos']
-        node_x.append(x)
-        node_y.append(y)
-
-    node_trace = go.Scatter(
-    x=node_x, y=node_y,
-    mode='markers',
-    hoverinfo='text',
-    marker=dict(
-        showscale=True,
-        # colorscale options
-        #'Greys' | 'YlGnBu' | 'Greens' | 'YlOrRd' | 'Bluered' | 'RdBu' |
-        #'Reds' | 'Blues' | 'Picnic' | 'Rainbow' | 'Portland' | 'Jet' |
-        #'Hot' | 'Blackbody' | 'Earth' | 'Electric' | 'Viridis' |
-        colorscale='Blues',
-        reversescale=True,
-        color=[],
-        size=6,
-        colorbar=dict(
-            thickness=15,
-            title='Node Connections',
-            xanchor='left',
-            titleside='right'
-        ),
-        line_width=0.3))
-
-    node_adjacencies = []
-    node_text = []
-    for node, adjacencies in enumerate(G.adjacency()):
-        node_adjacencies.append(len(adjacencies[1]))
-        node_text.append('# of connections: '+str(len(adjacencies[1])))
-
-    node_trace.marker.color = node_adjacencies
-    node_trace.text = node_text
-
-    fig = go.Figure(data=[edge_trace, node_trace],
-                layout=go.Layout(
-                title='<br>Neural network structure summary',
-                titlefont_size=16,
-                showlegend=False,
-                hovermode='closest',
-                margin=dict(b=20,l=5,r=5,t=40),
-                annotations=[ dict(
-                    text='',
-                    showarrow=False,
-                    xref="paper", yref="paper",
-                    x=0.005, y=-0.002 ) ],
-                xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                yaxis=dict(showgrid=False, zeroline=False, showticklabels=False))
-                )
-    fig.show()
+#################################
+# RUNNING TEST FOR MNIST CLASSIF
+#################################
 
 
-def MDS_analysis(matrices, labels_bb):
-
-    n = len(matrices)
-    m = len(set(labels_bb))
-
-    fig = make_subplots(rows=n,cols=1)
-
-    colors = ['mediumslateblue', 'mediumturquoise', 'yellowgreen', 'hotpink']
-    c = colors[:m]
-    legends = [True] + [False for _ in range(n-1)]
-
-    for j, D in enumerate(matrices):
-        
-        embedding = MDS(n_components=2, dissimilarity='precomputed')
-
-        MDS_ = embedding.fit_transform(D)
-
-        for i, digit in enumerate(set(labels_bb)):
-
-            mds = MDS_[labels_bb==digit]
-
-            fig.add_trace(go.Scatter(x=mds[:,0], y=mds[:,1], 
-                                     mode='markers', 
-                                     name=str(digit), 
-                                     showlegend=legends[j],
-                                     marker=dict(
-                                         color=c[i]
-                                    )), row=j+1, col=1)
-            
-
-    fig.update_layout(
-            title="Multi-dimensional scaling (MDS) of distance matrices",
-            legend_title="Digits",
-            height=900
-    )
-
-    fig.show()
-
-def heatmaps(matrices_tup):
-
-    m = matrices_tup[0].shape[0]
-    n = matrices_tup[0].shape[1]
-
-
-    imgs_ = np.vstack(matrices_tup).reshape(len(matrices_tup),m,n)
-    fig = px.imshow(imgs_, facet_col=0, facet_col_wrap=len(matrices_tup), color_continuous_scale=[[0.0, "rgb(165,0,38)"],
-                    [0.1111111111111111, "rgb(215,48,39)"],
-                    [0.2222222222222222, "rgb(244,109,67)"],
-                    [0.3333333333333333, "rgb(253,174,97)"],
-                    [0.4444444444444444, "rgb(254,224,144)"],
-                    [0.5555555555555556, "rgb(224,243,248)"],
-                    [0.6666666666666666, "rgb(171,217,233)"],
-                    [0.7777777777777778, "rgb(116,173,209)"],
-                    [0.8888888888888888, "rgb(69,117,180)"],
-                    [1.0, "rgb(49,54,149)"]])
-    fig.update_layout(height=400, width=800,title="Heat maps of distance matrices")
-    fig.show()
-
-def run_experiment(multifilt, images, labels):
+def run_experiment_cub(filtrations, images, labels, step=0.05, no_multi=False):
 
     matrices = []
 
-    for i, filt in enumerate(multifilt):
+    for i, filt in enumerate(filtrations):
 
         print("Computing Wasserstein matrix for filtration no.{}...".format(i+1))
-        D_1, fig_1, images_bb, labels_bb = wasserstein_matrix(images, labels, 1, filt)
-        D_0, fig_0, images_bb, labels_bb = wasserstein_matrix(images, labels, 0, filt)
+
+        D_1, fig_1, images_bb, labels_bb = distance_matrix_cub(images, labels, 1, [filt])
+        D_0, fig_0, images_bb, labels_bb = distance_matrix_cub(images, labels, 0, [filt])
         D = np.maximum(D_1, D_0)
 
         matrices.append(D)
 
+    if not no_multi:
+
+        print("Computing LISM matrix...")
+        
+        D_sheaf_1, fig_1, images_bb, labels_bb = distance_matrix_cub(images, labels, 1, filtrations, step)
+        D_sheaf_0, fig_0, images_bb, labels_bb = distance_matrix_cub(images, labels, 0, filtrations, step)
+
+        D_sheaf = np.maximum(D_sheaf_1, D_sheaf_0)
+
+        return tuple(matrices), D_sheaf, labels_bb
+
+    return tuple(matrices), labels_bb
+
+def run_experiment_simp(data, step=0.05, filt=0):
+
+    matrices = []
+
+    data_ = copy.copy(data)
+
+    n_filts = len(data_[0]['Multifiltration'])
+
+    datas = [data_ for _ in range(n_filts)]
+
+    for i in range(n_filts):
+
+        for j, G in enumerate(data_):
+
+            print(i, j)
+            
+            d=[G['Multifiltration'][i]]
+            datas[i][j]['Multifiltration']=d
+
+        print("Computing Wasserstein matrix for filtration no.{}...".format(i+1))
+
+        D_1, fig_1, images_bb, labels_bb = distance_matrix_simp(datas[i], dim=1, step=step)
+        D_0, fig_0, images_bb, labels_bb = distance_matrix_simp(datas[i], dim=0, step=step)
+        D = np.maximum(D_1, D_0)
+
+        matrices.append(D)
+
+        print("ok")
+
     print("Computing LISM matrix...")
-
-    if len(multifilt)==2:
     
-        D_sheaf_1, fig_1, images_bb, labels_bb = sheaf_distance_matrix(images, labels, 0.1, 1, multifilt)
-        D_sheaf_0, fig_0, images_bb, labels_bb = sheaf_distance_matrix(images, labels, 0.1, 0, multifilt)
-
-    elif len(multifilt)>2:
-
-        meta_data = [np.array([multifiltration(img,multifilt) for img in images_bb])]
-
-        pipe_1 = pipeline(1, meta_data, 392, dims=[1])
-        pipe_0 = pipeline(1, meta_data, 392, dims=[0])
-        D_sheaf_1 = pipe_1.distance_matrix(1) 
-        D_sheaf_0 = pipe_0.distance_matrix(0) 
+    D_sheaf_1, fig_1, images_bb, labels_bb = distance_matrix_simp(data_, dim=1, step=step, num_filt=filt)
+    D_sheaf_0, fig_0, images_bb, labels_bb = distance_matrix_simp(data_, dim=0, step=step, num_filt=filt)
 
     D_sheaf = np.maximum(D_sheaf_1, D_sheaf_0)
 
     return tuple(matrices), D_sheaf, labels_bb
 
 
+def accuracy(matrices_tuple, labels_bb, n_clusters):
 
-def PE_coeff(l, L):
+    N = matrices_tuple[0].shape[0]
 
-    frac = l/L
+    accuracies = []
 
-    return frac * np.log(frac)
+    for D in matrices_tuple:
+        acc = best_accuracy(D, labels_bb, n_clusters)
+        accuracies.append(acc)
 
-def PE(D):
-
-    L = np.sum(D[:,1]-D[:,0])
-    
-    S = [PE_coeff(l,L) for l in D[:,1]-D[:,0]]
-
-    return sum(S)
+    return accuracies
 
 
-def PE_analysis(images, filtration, dim=1):
 
-    vec = np.zeros((images.shape[0],1))
+def best_accuracy(D, labels_bb, n_clusters):
 
-    for i, img in enumerate(images):
+    N = labels_bb.shape[0]
 
-        I = multifiltration(img, [filtration])
+    kmeans = KMeans(n_clusters=4, random_state=0)
+    kmeans.fit(D)
+    pred = kmeans.labels_
+    pred
 
-        cc = gd.CubicalComplex(dimensions=I.shape, top_dimensional_cells=I.flatten())
-        pers = cc.persistence()
+    n_classes = len(set(labels_bb))
 
-        pers1 = [[tuple[1][0],tuple[1][1]] for tuple in pers if tuple[0]==dim and tuple[1][1]!=np.inf]
+    perm = permutations(list(set(labels_bb)))
 
-        D = np.array(pers1).reshape(len(pers1),2)
+    errors_list = []
 
-        vec[i]=PE(D)
-    
-    return vec
+    for i, p in enumerate(list(perm)):
+
+        L = copy.copy(labels_bb)
+
+        where_0 = np.where(L == p[0])
+        where_1 = np.where(L == p[1])
+        where_2 = np.where(L == p[2])
+        where_3 = np.where(L == p[3])
+
+        L[where_0] = 0
+        L[where_1] = 1
+        L[where_2] = 2
+        L[where_3] = 3
+
+        C = np.count_nonzero(L-pred)
+
+        errors_list.append({'error':C, 'permutation':p})
+
+    sort = sorted(errors_list, key=lambda x: x['error'])
+
+    return (N-sort[0]['error'])/N
 
 
-def PE_LISM_vector(images, multifilt, dim=1):
 
 
-    vec = np.zeros((images.shape[0],1))
+###############################
+# K1, K2 ARE TWO SIMPLEX TREES
+###############################
 
-    angles = np.arange(0, math.pi/2, 0.01)
+
+def compute_distance_simp(G1, G2, dim, step=0.05, num_filt=0):
+
+    st1 = G1['SimplexTree']
+    st2 = G2['SimplexTree']
+
+    fct1 = G1['Multifiltration']
+    fct2 = G2['Multifiltration']
+
+    if len(fct1)==2:
+
+        F1 = np.stack(tuple(fct1),axis=1)
+        F2 = np.stack(tuple(fct2),axis=1)
+        
+        return fast_grid_search_K1K2(F1, F2, st1, st2, step, dim)
+
+    elif len(fct1)>2:
+
+        # random initial projection 
+        #x = np.hstack((np.array([1]),np.random.rand(len(fct1)-2)*np.pi,np.random.rand(1)*np.pi*2))
+        #x = np.hstack((np.array([1]),np.random.rand(0)*np.pi,np.random.rand(1)*np.pi*2))
+        #p_ = np.abs(n_sphere.convert_rectangular(x).reshape(len(fct1),1))
+        #p_ = np.abs(n_sphere.convert_rectangular(x).reshape(2,1))
+        #p = tf.Variable(initial_value=p_, trainable=True, dtype = tf.float32)
+
+        F1 = np.stack(tuple(fct1),axis=1)[:,num_filt:num_filt+2]
+        F2 = np.stack(tuple(fct2),axis=1)[:,num_filt:num_filt+2]
+        return fast_grid_search_K1K2(F1, F2, st1, st2, step, dim)
+
+        #model = SimplexTreeModel_ISM_K1K2(p, F1, F2, st1, st2, dim=dim, card=50)
+
+        #return fast_optim(model).numpy()
+
+    elif len(fct1)==1:
+
+        F1 = fct1[0]
+        F2 = fct2[0]
+
+        # Assign new filtration values
+
+        for v in range(st1.num_vertices()):
+            st1.assign_filtration([v], F1[v])
+        st1.make_filtration_non_decreasing()
+
+        for v in range(st2.num_vertices()):
+            st2.assign_filtration([v], F2[v])
+        st2.make_filtration_non_decreasing()
+
+        dgm1 = st1.persistence()
+        dgm2 = st2.persistence()
+
+        dgm1_ = np.array([[tuple[1][0], tuple[1][1]] for tuple in dgm1 if tuple[0]==dim and tuple[1][1]!=np.inf])
+        dgm2_ = np.array([[tuple[1][0], tuple[1][1]] for tuple in dgm2 if tuple[0]==dim and tuple[1][1]!=np.inf])
+        
+        return wasserstein_distance(dgm1_, dgm2_, order=2)
+
+
+def distance_matrix_simp(data, dim, step=0.05, num_filt=0):
+
+    N = len(data)
+
+    l_sorted = sorted(data, key=lambda d: d['Label']) 
+    data_bb = [l_sorted[i]['Multifiltration'] for i in range(N)]
+    labels_bb = np.array([l_sorted[i]['Label'] for i in range(N)])
+
+    D = np.zeros((N,N))
+
+    for i, G1 in tqdm(enumerate(l_sorted)):
+        for j, G2 in enumerate(l_sorted):
+            if i<j:
+                
+                D[i,j] = compute_distance_simp(G1, G2, dim, step, num_filt)
+
+    D += np.transpose(D)
+
+    fig = px.imshow(D,height=470, width=470)
+
+    return D, fig, data_bb, labels_bb
+
+
+
+
+def fast_grid_search_K1K2(fct1, fct2, st1, st2, step=0.01, dim=0):
+
+    angles = np.arange(0, math.pi/2, step)
     linear_forms = [np.array([math.cos(theta), math.sin(theta)]).reshape(2,1) for theta in angles ]
 
-    for i, img in tqdm(enumerate(images)):
+    distances = []
 
-        A = []
+    for p in linear_forms:
 
-        I = multifiltration(img, multifilt)
 
-        for p in linear_forms:
+        fct1p = np.tensordot(fct1,p,1)
+        fct2p = np.tensordot(fct2,p,1)
 
-            Ip = np.tensordot(I,p,1)
+        # Assign new filtration values
+        for v in range(st1.num_vertices()):
+            st1.assign_filtration([v], fct1p[v])
+        st1.make_filtration_non_decreasing()
+        for v in range(st2.num_vertices()):
+            st2.assign_filtration([v], fct2p[v])
+        st2.make_filtration_non_decreasing()
+        dgm1 = st1.persistence()
+        dgm2 = st2.persistence()
+        dgm1_ = np.array([[tuple[1][0], tuple[1][1]] for tuple in dgm1 if tuple[0]==dim and tuple[1][1]!=np.inf])
+        dgm2_ = np.array([[tuple[1][0], tuple[1][1]] for tuple in dgm2 if tuple[0]==dim and tuple[1][1]!=np.inf])
+        
+        distances.append(wasserstein_distance(dgm1_, dgm2_, order=2))
 
-            cc = gd.CubicalComplex(dimensions=Ip.shape, top_dimensional_cells=Ip.flatten())
-            pers = cc.persistence()
-
-            pers1 = [[tuple[1][0],tuple[1][1]] for tuple in pers if tuple[0]==dim and tuple[1][1]!=np.inf]
-
-            D = np.array(pers1).reshape(len(pers1),2)
-
-            A.append(PE(D))
-
-        vec[i]=min(A)
+    dist = max(distances)
     
-    return vec
+    return dist
+
+
+
+
+

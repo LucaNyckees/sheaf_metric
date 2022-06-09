@@ -10,6 +10,8 @@ from tqdm import tqdm
 from difftda import Cubical
 import n_sphere
 
+
+
 class pipeline():
 
     def __init__(self, object, meta_data, card, dims=[0]):
@@ -72,7 +74,7 @@ class pipeline():
             if epoch > 5:
                 diff = tf.abs(tf.norm(optimization['projections'][epoch])-tf.norm(optimization['projections'][epoch-1]))
                     
-                if diff < 0.0005:
+                if diff < 0.00005:
                         
                     p_opt = model.p/tf.norm(model.p)
 
@@ -118,8 +120,57 @@ class pipeline():
         else:
             return optimization
 
+    def fast_optim(self, model, use_reg=True, alpha=1, lambda_=1, sigma=0.001):
 
-    def distance_matrix(self, dim):
+        lr = tf.keras.optimizers.schedules.InverseTimeDecay(initial_learning_rate=0.7, decay_steps=10, decay_rate=.1)
+        optimizer = tf.keras.optimizers.SGD(learning_rate=lr)
+        # init_lr = 0.5
+        # decay_steps = 10
+        # decay_rate = .01
+        projections = [] 
+
+        for epoch in range(50+1):
+
+            if epoch > 5:
+                diff = tf.abs(tf.norm(projections[epoch-1])-tf.norm(projections[epoch-2]))
+                    
+                if diff < 0.005:
+                        
+                    p_opt = model.p/tf.norm(model.p)
+
+                    model.p = p_opt
+
+                    dgm1, dgm2 = model.call()
+
+                    amplitude = alpha * wasserstein_distance(dgm1, dgm2, order=2, enable_autodiff=True)
+                                    
+                    return amplitude
+
+            with tf.GradientTape() as tape:
+                
+                dgm1, dgm2 = model.call()
+                
+                if use_reg:
+                    amplitude = alpha * wasserstein_distance(dgm1, dgm2, order=2, enable_autodiff=True)
+                    loss = - amplitude + lambda_*(tf.norm(model.p)-1)**2
+                else:
+                    amplitude = alpha * wasserstein_distance(dgm1, dgm2, order=2, enable_autodiff=True)
+                    loss = - amplitude 
+                
+            gradients = tape.gradient(loss, model.trainable_variables)
+            
+            np.random.seed(epoch)
+            # gradients = [tf.convert_to_tensor(gradients[0])]
+            gradients[0] = gradients[0] + np.random.normal(loc=0., scale=sigma, size=gradients[0].shape)
+            optimizer.apply_gradients(zip(gradients, model.trainable_variables))
+
+            projections.append(model.p.numpy())
+
+        return amplitude
+
+
+
+    def distance_matrix(self, dim, fast=True):
 
         N = self.meta_data[0].shape[0]
         data = self.meta_data[0]
@@ -135,37 +186,44 @@ class pipeline():
 
         D = np.zeros((N,N))
 
+        multifilt1 = data[0]
+        multifilt2 = data[0]
+        m1 = tf.Variable(initial_value=multifilt1, trainable=False, dtype=tf.float32)
+        m2 = tf.Variable(initial_value=multifilt2, trainable=False, dtype=tf.float32)
+
+        model = method(p, m1, m2, dim)
+
         for i in tqdm(range(N)):
             for j in range(N):
                 if i<j:
                     
                     multifilt1 = data[i]
                     multifilt2 = data[j]
-                    # random intial projection 
+                    # random initial projection 
                     x = np.hstack((np.array([1]),np.random.rand(n_features-2)*np.pi,np.random.rand(1)*np.pi*2))
                     p_ = np.abs(n_sphere.convert_rectangular(x).reshape(n_features,1))
                     p = tf.Variable(initial_value=p_, trainable=True, dtype = tf.float32)
                     # converting multifiltrations to tensorflow non-trainable variables
                     m1 = tf.Variable(initial_value=multifilt1, trainable=False, dtype=tf.float32)
                     m2 = tf.Variable(initial_value=multifilt2, trainable=False, dtype=tf.float32)
+                    
+                    model.I = m1
+                    model.J = m2
+                    model.p = p
 
-                    # initializing the input-model
-                    model = method(p, m1, m2, dim)
-
-                    dist = self.optim(model, fast=True)
+                    if not fast:
+                        dist = self.optim(model, fast=True)
+                    elif fast:
+                        dist = self.fast_optim(model)
                     D[i,j] = dist
 
         D += np.transpose(D)
 
         return D
 
-    def entropy_vector(self, dim=0):
-
-        return 0
-
         
 
-    def single_distance(self, dim=0):
+    def single_distance(self, dim=0, p_init = 0):
 
         data = self.meta_data[0]
         N = data.shape[0]
@@ -183,10 +241,15 @@ class pipeline():
 
             method = self.cub_persistence
 
-        # random intial projection 
-        x = np.hstack((np.array([1]),np.random.rand(n_features-2)*np.pi,np.random.rand(1)*np.pi*2))
-        p_ = np.abs(n_sphere.convert_rectangular(x).reshape(n_features,1))
-        p = tf.Variable(initial_value=p_, trainable=True, dtype = tf.float32)
+        if p_init==0:
+            # random intial projection 
+            x = np.hstack((np.array([1]),np.random.rand(n_features-2)*np.pi,np.random.rand(1)*np.pi*2))
+            p_ = np.abs(n_sphere.convert_rectangular(x).reshape(n_features,1))
+            p = tf.Variable(initial_value=p_, trainable=True, dtype = tf.float32)
+
+        else:
+
+            p = tf.Variable(initial_value=np.array(p_init).reshape(n_features,1), trainable=True, dtype = tf.float32)
         
         # converting multifiltrations to tensorflow non-trainable variables
         m1 = tf.Variable(initial_value=data[0], trainable=False, dtype=tf.float32)
@@ -324,3 +387,55 @@ def fast_grid_search(I, J, step = 0.01, dim=1):
     return dist
 
 
+
+
+
+
+
+def fast_optim(model, use_reg=True, alpha=1, lambda_=1, sigma=0.001):
+
+        lr = tf.keras.optimizers.schedules.InverseTimeDecay(initial_learning_rate=0.7, decay_steps=10, decay_rate=.1)
+        optimizer = tf.keras.optimizers.SGD(learning_rate=lr)
+        # init_lr = 0.5
+        # decay_steps = 10
+        # decay_rate = .01
+        projections = [] 
+
+        for epoch in range(50+1):
+
+            if epoch > 5:
+                diff = tf.abs(tf.norm(projections[epoch-1])-tf.norm(projections[epoch-2]))
+                    
+                if diff < 0.005:
+                        
+                    p_opt = model.p/tf.norm(model.p)
+
+                    model.p = p_opt
+
+                    dgm1, dgm2 = model.call()
+
+                    amplitude = alpha * wasserstein_distance(dgm1, dgm2, order=2, enable_autodiff=True)
+                                    
+                    return amplitude
+
+            with tf.GradientTape() as tape:
+                
+                dgm1, dgm2 = model.call()
+                
+                if use_reg:
+                    amplitude = alpha * wasserstein_distance(dgm1, dgm2, order=2, enable_autodiff=True)
+                    loss = - amplitude + lambda_*(tf.norm(model.p)-1)**2
+                else:
+                    amplitude = alpha * wasserstein_distance(dgm1, dgm2, order=2, enable_autodiff=True)
+                    loss = - amplitude 
+                
+            gradients = tape.gradient(loss, model.trainable_variables)
+            
+            np.random.seed(epoch)
+            # gradients = [tf.convert_to_tensor(gradients[0])]
+            gradients[0] = gradients[0] + np.random.normal(loc=0., scale=sigma, size=gradients[0].shape)
+            optimizer.apply_gradients(zip(gradients, model.trainable_variables))
+
+            projections.append(model.p.numpy())
+
+        return amplitude
