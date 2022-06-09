@@ -191,6 +191,11 @@ class pipeline():
         m1 = tf.Variable(initial_value=multifilt1, trainable=False, dtype=tf.float32)
         m2 = tf.Variable(initial_value=multifilt2, trainable=False, dtype=tf.float32)
 
+        # random initial projection 
+        x = np.hstack((np.array([1]),np.random.rand(n_features-2)*np.pi,np.random.rand(1)*np.pi*2))
+        p_ = np.abs(n_sphere.convert_rectangular(x).reshape(n_features,1))
+        p = tf.Variable(initial_value=p_, trainable=True, dtype = tf.float32)
+
         model = method(p, m1, m2, dim)
 
         for i in tqdm(range(N)):
