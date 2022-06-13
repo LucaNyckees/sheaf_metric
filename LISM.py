@@ -9,6 +9,7 @@ import plotly.graph_objects as go
 from tqdm import tqdm
 from difftda import Cubical
 import n_sphere
+import copy
 
 
 
@@ -74,20 +75,49 @@ class pipeline():
             if epoch > 5:
                 diff = tf.abs(tf.norm(optimization['projections'][epoch])-tf.norm(optimization['projections'][epoch-1]))
                     
-                if diff < 0.00005:
+                if diff < 0.00005 or any(tf.math.sign(model.p)<0):
                         
                     p_opt = model.p/tf.norm(model.p)
 
                     model.p = p_opt
 
-                    dgm1, dgm2 = model.call()
+                    ################
+                    p_copy = copy.copy(p_opt).numpy()
+            
+                    for j in range(p_copy.shape[0]):
 
-                    amplitude = alpha * tf.sqrt(wasserstein_distance(dgm1, dgm2, order=2, enable_autodiff=True))
+                        if np.sign(p_copy[j])<0:
+
+                            p_copy[j]=0
+
+                    I_copy = model.I.numpy()
+                    J_copy = model.J.numpy()
+
+                    Ip = np.tensordot(I_copy,p_copy,1)
+                    Jp = np.tensordot(J_copy,p_copy,1)
+
+                    cc = gd.CubicalComplex(dimensions=Ip.shape, top_dimensional_cells=Ip.flatten())
+                    pers = cc.persistence()
+                    cc_ = gd.CubicalComplex(dimensions=Jp.shape, top_dimensional_cells=Jp.flatten())
+                    pers_ = cc_.persistence()
+
+                    pers1 = [[tuple[1][0],tuple[1][1]] for tuple in pers if tuple[0]==model.dim and tuple[1][1]!=np.inf]
+                    pers2 = [[tuple[1][0],tuple[1][1]] for tuple in pers_ if tuple[0]==model.dim and tuple[1][1]!=np.inf]
+
+                    dgm1 = np.array(pers1).reshape(len(pers1),2)
+                    dgm2 = np.array(pers2).reshape(len(pers2),2)
+
+                    ################
+
+                    #dgm1, dgm2 = model.call()
+
+                    amplitude = alpha * wasserstein_distance(dgm1, dgm2, order=2, enable_autodiff=True)
                     loss = - amplitude + lambda_*(tf.norm(model.p)-1)**2
 
-                    optimization['projections'].append(model.p.numpy())
+                    #optimization['projections'].append(model.p.numpy())
+                    optimization['projections'].append(p_copy)
                     optimization['losses'].append(loss.numpy())
-                    optimization['amplitudes'].append(amplitude.numpy())
+                    optimization['amplitudes'].append(amplitude)
                     optimization['diagrams'].append((dgm1,dgm2))
                     
                     break
@@ -95,13 +125,21 @@ class pipeline():
             with tf.GradientTape() as tape:
                 
                 dgm1, dgm2 = model.call()
+
+                #s = 0
+
+                #for j in range(model.p.shape[0]):
+
+                    #s += 1000*tf.math.sign(model.p[j])
                 
                 if use_reg:
-                    amplitude = alpha * tf.sqrt(wasserstein_distance(dgm1, dgm2, order=2, enable_autodiff=True))
-                    loss = - amplitude + lambda_*(tf.norm(model.p)-1)**2
+                    amplitude = alpha * wasserstein_distance(dgm1, dgm2, order=2, enable_autodiff=True)
+                    loss = - amplitude + lambda_*(tf.norm(model.p)-1)**2 #- s
                 else:
-                    amplitude = alpha * tf.sqrt(wasserstein_distance(dgm1, dgm2, order=2, enable_autodiff=True))
+                    amplitude = alpha * wasserstein_distance(dgm1, dgm2, order=2, enable_autodiff=True)
                     loss = - amplitude 
+
+
                 
             gradients = tape.gradient(loss, model.trainable_variables)
             
@@ -132,18 +170,44 @@ class pipeline():
         for epoch in range(50+1):
 
             if epoch > 5:
-                diff = tf.abs(tf.norm(projections[epoch-1])-tf.norm(projections[epoch-2]))
+                diff = tf.abs(tf.norm(projections[epoch])-tf.norm(projections[epoch-1]))
                     
-                if diff < 0.005:
+                if diff < 0.005 or any(tf.math.sign(model.p)<0):
                         
                     p_opt = model.p/tf.norm(model.p)
 
                     model.p = p_opt
 
-                    dgm1, dgm2 = model.call()
+                    ################
+                    p_copy = copy.copy(p_opt).numpy()
+            
+                    for j in range(p_copy.shape[0]):
+
+                        if np.sign(p_copy[j])<0:
+
+                            p_copy[j]=0
+
+                    I_copy = model.I.numpy()
+                    J_copy = model.J.numpy()
+
+                    Ip = np.tensordot(I_copy,p_copy,1)
+                    Jp = np.tensordot(J_copy,p_copy,1)
+
+                    cc = gd.CubicalComplex(dimensions=Ip.shape, top_dimensional_cells=Ip.flatten())
+                    pers = cc.persistence()
+                    cc_ = gd.CubicalComplex(dimensions=Jp.shape, top_dimensional_cells=Jp.flatten())
+                    pers_ = cc_.persistence()
+
+                    pers1 = [[tuple[1][0],tuple[1][1]] for tuple in pers if tuple[0]==model.dim and tuple[1][1]!=np.inf]
+                    pers2 = [[tuple[1][0],tuple[1][1]] for tuple in pers_ if tuple[0]==model.dim and tuple[1][1]!=np.inf]
+
+                    dgm1 = np.array(pers1).reshape(len(pers1),2)
+                    dgm2 = np.array(pers2).reshape(len(pers2),2)
+
+                    ################
 
                     amplitude = alpha * wasserstein_distance(dgm1, dgm2, order=2, enable_autodiff=True)
-                                    
+
                     return amplitude
 
             with tf.GradientTape() as tape:
@@ -255,6 +319,7 @@ class pipeline():
         else:
 
             p = tf.Variable(initial_value=np.array(p_init).reshape(n_features,1), trainable=True, dtype = tf.float32)
+            #tf.keras.constraints.non_neg.__call__(self, p)
         
         # converting multifiltrations to tensorflow non-trainable variables
         m1 = tf.Variable(initial_value=data[0], trainable=False, dtype=tf.float32)
@@ -411,13 +476,39 @@ def fast_optim(model, use_reg=True, alpha=1, lambda_=1, sigma=0.001):
             if epoch > 5:
                 diff = tf.abs(tf.norm(projections[epoch-1])-tf.norm(projections[epoch-2]))
                     
-                if diff < 0.005:
+                if diff < 0.005 or any(tf.math.sign(model.p)<0):
                         
                     p_opt = model.p/tf.norm(model.p)
 
                     model.p = p_opt
 
-                    dgm1, dgm2 = model.call()
+                    ################
+                    p_copy = copy.copy(p_opt).numpy()
+            
+                    for j in range(p_copy.shape[0]):
+
+                        if np.sign(p_copy[j])<0:
+
+                            p_copy[j]=0
+
+                    I_copy = copy.copy(model.I)
+                    J_copy = copy.copy(model.J)
+
+                    Ip = np.tensordot(I_copy,p_copy,1)
+                    Jp = np.tensordot(J_copy,p_copy,1)
+
+                    cc = gd.CubicalComplex(dimensions=Ip.shape, top_dimensional_cells=Ip.flatten())
+                    pers = cc.persistence()
+                    cc_ = gd.CubicalComplex(dimensions=Jp.shape, top_dimensional_cells=Jp.flatten())
+                    pers_ = cc_.persistence()
+
+                    pers1 = [[tuple[1][0],tuple[1][1]] for tuple in pers if tuple[0]==model.dim and tuple[1][1]!=np.inf]
+                    pers2 = [[tuple[1][0],tuple[1][1]] for tuple in pers_ if tuple[0]==model.dim and tuple[1][1]!=np.inf]
+
+                    dgm1 = np.array(pers1).reshape(len(pers1),2)
+                    dgm2 = np.array(pers2).reshape(len(pers2),2)
+
+                    ################
 
                     amplitude = alpha * wasserstein_distance(dgm1, dgm2, order=2, enable_autodiff=True)
                                     

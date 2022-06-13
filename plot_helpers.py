@@ -47,7 +47,7 @@ def plot_optim(optimization):
 
     if n_features == 3:
         
-        fig = make_subplots(rows=1,cols=nb_cols, subplot_titles=("loss and amplitude", "projection", "dgm1", "dgm2"),
+        fig = make_subplots(rows=1,cols=nb_cols, subplot_titles=("projected distance", "projection", "dgm1", "dgm2"),
                         specs=[[{"type": 'xy'}, {"type": 'scene'}, {"type": "xy"}, {"type": 'xy'}]])
 
     else:

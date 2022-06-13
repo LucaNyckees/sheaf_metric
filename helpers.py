@@ -1,3 +1,4 @@
+from certifi import where
 import numpy as np
 from tqdm import tqdm
 import gudhi as gd
@@ -64,7 +65,7 @@ def compute_distance_cub(I, J, dim, step=0.05):
 
         model = CubicalModel_ISM(p, I, J, dim=dim, card=card)
 
-        return fast_optim(model).numpy()
+        return fast_optim(model)
 
     elif len(I.shape)==2 or (len(I.shape)==3 and I.shape[-1]==1):
 
@@ -83,7 +84,7 @@ def compute_distance_cub(I, J, dim, step=0.05):
 
 
 
-def distance_matrix_cub(images, train_y, dim, filtrations, step=0.05):
+def distance_matrix_cub(images, train_y, dim, filtrations, step=0.05, suivi=False):
 
     N = len(images)
     labels = train_y[:N]
@@ -102,6 +103,8 @@ def distance_matrix_cub(images, train_y, dim, filtrations, step=0.05):
                 J = multifiltration(img2, filtrations)
                 
                 D[i,j] = compute_distance_cub(I, J, dim, step)
+                if suivi:
+                    print(i,j,D[i,j])
 
     D += np.transpose(D)
 
@@ -230,19 +233,20 @@ def run_experiment_simp(data, step=0.05, filt=0):
 
     matrices = []
 
-    data_ = copy.copy(data)
-
-    n_filts = len(data_[0]['Multifiltration'])
-
-    datas = [data_ for _ in range(n_filts)]
+    n_filts = len(data[0]['Multifiltration'])
 
     for i in range(n_filts):
 
-        for j, G in enumerate(data_):
+        for j, G in enumerate(data):
+
+            data_ = copy.copy(data)
+
+            datas = [data_ for _ in range(n_filts)]
 
             print(i, j)
             
-            d=[G['Multifiltration'][i]]
+            d=[copy.copy(G)['Multifiltration'][i]]
+
             datas[i][j]['Multifiltration']=d
 
         print("Computing Wasserstein matrix for filtration no.{}...".format(i+1))
@@ -252,8 +256,6 @@ def run_experiment_simp(data, step=0.05, filt=0):
         D = np.maximum(D_1, D_0)
 
         matrices.append(D)
-
-        print("ok")
 
     print("Computing LISM matrix...")
     
@@ -266,8 +268,6 @@ def run_experiment_simp(data, step=0.05, filt=0):
 
 
 def accuracy(matrices_tuple, labels_bb, n_clusters):
-
-    N = matrices_tuple[0].shape[0]
 
     accuracies = []
 
@@ -283,7 +283,7 @@ def best_accuracy(D, labels_bb, n_clusters):
 
     N = labels_bb.shape[0]
 
-    kmeans = KMeans(n_clusters=4, random_state=0)
+    kmeans = KMeans(n_clusters=n_clusters, random_state=0)
     kmeans.fit(D)
     pred = kmeans.labels_
     pred
@@ -298,15 +298,15 @@ def best_accuracy(D, labels_bb, n_clusters):
 
         L = copy.copy(labels_bb)
 
-        where_0 = np.where(L == p[0])
-        where_1 = np.where(L == p[1])
-        where_2 = np.where(L == p[2])
-        where_3 = np.where(L == p[3])
+        indices = []
 
-        L[where_0] = 0
-        L[where_1] = 1
-        L[where_2] = 2
-        L[where_3] = 3
+        for j in range(n_classes):
+
+            indices.append(np.where(L == p[j]))
+
+        for j in range(n_classes):
+
+            L[indices[j]] = j
 
         C = np.count_nonzero(L-pred)
 
@@ -324,7 +324,7 @@ def best_accuracy(D, labels_bb, n_clusters):
 ###############################
 
 
-def compute_distance_simp(G1, G2, dim, step=0.05, num_filt=0):
+def compute_distance_simp(G1, G2, dim, step=0.05, filt_nums=[0]):
 
     st1 = G1['SimplexTree']
     st2 = G2['SimplexTree']
@@ -332,14 +332,16 @@ def compute_distance_simp(G1, G2, dim, step=0.05, num_filt=0):
     fct1 = G1['Multifiltration']
     fct2 = G2['Multifiltration']
 
-    if len(fct1)==2:
+    F1 = np.stack(tuple(fct1),axis=1)[:,filt_nums]
+    F2 = np.stack(tuple(fct2),axis=1)[:,filt_nums]
 
-        F1 = np.stack(tuple(fct1),axis=1)
-        F2 = np.stack(tuple(fct2),axis=1)
+    if len(filt_nums)==2:
         
         return fast_grid_search_K1K2(F1, F2, st1, st2, step, dim)
 
-    elif len(fct1)>2:
+    elif len(filt_nums)>2:
+
+        print("Method not implemented for d-filtrations with d>2 yet.")
 
         # random initial projection 
         #x = np.hstack((np.array([1]),np.random.rand(len(fct1)-2)*np.pi,np.random.rand(1)*np.pi*2))
@@ -348,20 +350,13 @@ def compute_distance_simp(G1, G2, dim, step=0.05, num_filt=0):
         #p_ = np.abs(n_sphere.convert_rectangular(x).reshape(2,1))
         #p = tf.Variable(initial_value=p_, trainable=True, dtype = tf.float32)
 
-        F1 = np.stack(tuple(fct1),axis=1)[:,num_filt:num_filt+2]
-        F2 = np.stack(tuple(fct2),axis=1)[:,num_filt:num_filt+2]
-        return fast_grid_search_K1K2(F1, F2, st1, st2, step, dim)
+        return None
 
         #model = SimplexTreeModel_ISM_K1K2(p, F1, F2, st1, st2, dim=dim, card=50)
 
         #return fast_optim(model).numpy()
 
-    elif len(fct1)==1:
-
-        F1 = fct1[0]
-        F2 = fct2[0]
-
-        # Assign new filtration values
+    elif len(filt_nums)==1:
 
         for v in range(st1.num_vertices()):
             st1.assign_filtration([v], F1[v])
@@ -380,7 +375,7 @@ def compute_distance_simp(G1, G2, dim, step=0.05, num_filt=0):
         return wasserstein_distance(dgm1_, dgm2_, order=2)
 
 
-def distance_matrix_simp(data, dim, step=0.05, num_filt=0):
+def distance_matrix_simp(data, dim, step=0.05, filt_nums=[0]):
 
     N = len(data)
 
@@ -394,7 +389,7 @@ def distance_matrix_simp(data, dim, step=0.05, num_filt=0):
         for j, G2 in enumerate(l_sorted):
             if i<j:
                 
-                D[i,j] = compute_distance_simp(G1, G2, dim, step, num_filt)
+                D[i,j] = compute_distance_simp(G1, G2, dim, step, filt_nums)
 
     D += np.transpose(D)
 
@@ -437,6 +432,65 @@ def fast_grid_search_K1K2(fct1, fct2, st1, st2, step=0.01, dim=0):
     return dist
 
 
+##### SLICED CONV DIST
 
 
 
+
+
+def sliced_conv_dist_cub(I,J,dim,n):
+
+    distances = []
+
+    n_features = I.shape[-1] if len(I.shape)==3 else 1
+
+    for j in range(n):
+        
+        x = np.hstack((np.array([1]),np.random.rand(n_features-2)*np.pi,np.random.rand(1)*np.pi*2))
+        p = np.abs(n_sphere.convert_rectangular(x).reshape(n_features,1))
+
+        Ip = np.tensordot(I,p,1).reshape(I.shape[0],I.shape[0])
+        Jp = np.tensordot(J,p,1).reshape(J.shape[0],J.shape[0])
+
+        cc = gd.CubicalComplex(dimensions=Ip.shape, top_dimensional_cells=Ip.flatten())
+        pers = cc.persistence()
+        cc_ = gd.CubicalComplex(dimensions=Jp.shape, top_dimensional_cells=Jp.flatten())
+        pers_ = cc_.persistence()
+
+        pers1 = [[tuple[1][0],tuple[1][1]] for tuple in pers if tuple[0]==dim and tuple[1][1]!=np.inf]
+        pers2 = [[tuple[1][0],tuple[1][1]] for tuple in pers_ if tuple[0]==dim and tuple[1][1]!=np.inf]
+
+        dgm1 = np.array(pers1).reshape(len(pers1),2)
+        dgm2 = np.array(pers2).reshape(len(pers2),2)
+
+        distances.append(wasserstein_distance(dgm1, dgm2, order=2))
+
+    S = np.mean(distances)
+
+    return S
+
+def matrix_sliced_conv_dist_cub(images, train_y, dim, filtrations, n=100):
+
+    N = len(images)
+    labels = train_y[:N]
+    l = [{'image':images[i], 'label':labels[i]} for i in range(N)]
+    l_sorted = sorted(l, key=lambda d: d['label']) 
+    images_bb = np.array([l_sorted[i]['image'] for i in range(N)])
+    labels_bb = np.array([l_sorted[i]['label'] for i in range(N)])
+
+    D = np.zeros((N,N))
+
+    for i, img1 in tqdm(enumerate(images_bb)):
+        for j, img2 in enumerate(images_bb):
+            if i<j:
+
+                I = multifiltration(img1, filtrations)
+                J = multifiltration(img2, filtrations)
+                
+                D[i,j] = sliced_conv_dist_cub(I,J,dim,n)
+
+    D += np.transpose(D)
+
+    fig = px.imshow(D,height=470, width=470)
+
+    return D, fig, images_bb, labels_bb
