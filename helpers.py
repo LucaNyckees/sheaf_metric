@@ -8,12 +8,16 @@ from gtda.images import Binarizer
 from sklearn.cluster                      import KMeans
 import plotly.express as px
 import networkx as nx
-from LISM import fast_grid_search, pipeline, fast_optim
+from LISM import fast_grid_search, fast_grid_search_amp, pipeline, fast_optim
 from difftda import CubicalModel_ISM, SimplexTreeModel_ISM_K1K2
 import tensorflow as tf
 import n_sphere
 import copy
 from itertools import permutations
+
+# In this file, we implement some helper functions used for looking at applications of the LISM.
+# More precisely, we define multi-filtrations on images (radial and height), implement some 
+# testing pipelines used for evaluating filtrations for image classification.
 
 
 ####################
@@ -113,6 +117,30 @@ def distance_matrix_cub(images, train_y, dim, filtrations, step=0.05, suivi=Fals
     return D, fig, images_bb, labels_bb
 
 
+def compute_amplitude_cub(I, dim, step=0.05):
+
+    if I.shape[-1]==2 and len(I.shape)==3:
+        
+        return fast_grid_search_amp(I, step, dim)
+
+    elif len(I.shape)==2 or (len(I.shape)==3 and I.shape[-1]==1):
+
+        cc = gd.CubicalComplex(dimensions=I.shape, top_dimensional_cells=I.flatten())
+        pers = cc.persistence()
+
+        pers1 = [[tuple[1][0],tuple[1][1]] for tuple in pers if tuple[0]==dim and tuple[1][1]!=np.inf]
+
+        dgm1 = np.array(pers1).reshape(len(pers1),2)
+
+        return wasserstein_distance(dgm1, [], order=2)
+
+    
+
+
+
+
+
+
 ###############################
 # NEURAL NETWORKS CONNECTIVITY
 ###############################
@@ -205,6 +233,8 @@ def connected_geometric_network(simplex_list, layers):
 def run_experiment_cub(filtrations, images, labels, step=0.05, no_multi=False):
 
     matrices = []
+    matrices_0 = []
+    matrices_1 = []
 
     for i, filt in enumerate(filtrations):
 
@@ -213,8 +243,9 @@ def run_experiment_cub(filtrations, images, labels, step=0.05, no_multi=False):
         D_1, fig_1, images_bb, labels_bb = distance_matrix_cub(images, labels, 1, [filt])
         D_0, fig_0, images_bb, labels_bb = distance_matrix_cub(images, labels, 0, [filt])
         D = np.maximum(D_1, D_0)
-
         matrices.append(D)
+        matrices_0.append(D_0)
+        matrices_1.append(D_1)
 
     if not no_multi:
 
@@ -227,7 +258,7 @@ def run_experiment_cub(filtrations, images, labels, step=0.05, no_multi=False):
 
         return tuple(matrices), D_sheaf, labels_bb
 
-    return tuple(matrices), labels_bb
+    return tuple(matrices), tuple(matrices_0), tuple(matrices_1), labels_bb
 
 def run_experiment_simp(data, step=0.05, filt=0):
 
@@ -432,10 +463,9 @@ def fast_grid_search_K1K2(fct1, fct2, st1, st2, step=0.01, dim=0):
     return dist
 
 
-##### SLICED CONV DIST
+##### SLICED CONVOLUTION DISTANCE 
 
-
-
+# This is a kind of projected distance introduced by N. Berkouk and F. Petit (2022).
 
 
 def sliced_conv_dist_cub(I,J,dim,n):
@@ -494,3 +524,4 @@ def matrix_sliced_conv_dist_cub(images, train_y, dim, filtrations, n=100):
     fig = px.imshow(D,height=470, width=470)
 
     return D, fig, images_bb, labels_bb
+

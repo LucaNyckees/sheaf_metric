@@ -2,6 +2,8 @@ import numpy               as np
 import tensorflow          as tf
 import gudhi               as gd
 
+# ADAPTED FROM https://github.com/MathieuCarriere/difftda
+
 # In this file, we write functions based on the Gudhi library that compute persistence diagrams associated to 
 # different filtrations (lower star, Rips, cubical), as well as the corresponding positive and negative 
 # simplices. We also wrap these functions into Tensorflow models.
@@ -307,7 +309,7 @@ class CubicalModel(tf.keras.Model):
         return dgm
 
 ##########################
-##### LISM CUB MODEL #####
+##### LISM CUBICAL MODEL #####
 ##########################
 
 

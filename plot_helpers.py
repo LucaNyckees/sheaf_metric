@@ -8,6 +8,17 @@ import plotly.express as px
 import n_sphere
 from sklearn.manifold import MDS
 
+# In this file, we implement functions used to visualize 
+#
+#  (1) the convergence behavior during the topological optimization
+#    process of computing a linear integral sheaf metric (LISM),
+#
+#  (2) (multi-)filtrations (radial and height) on gray-scale images,
+#
+#  (3) multi-dimensional embeddings of distance matrices,
+#
+#  (4) heat map plots of distance matrices.
+
 
 def plot_bifiltration(plot1,plot2):
 
@@ -59,9 +70,9 @@ def plot_optim(optimization):
     losses = optimization['losses']
 
     norms = [tf.norm(p) for p in projections]
-    angles = np.arange(0, math.pi/2, 0.01)
-    cosines = list(map(np.cos,angles))
-    sines = list(map(np.sin,angles))
+    params = np.arange(0, 1, 0.01)
+    x_params = list(params)
+    y_params = [1-t for t in params]
 
     """fig.add_trace(go.Scatter(x=epochs,y=losses,mode="lines",name="loss",marker=dict(
             color='skyblue'
@@ -71,12 +82,12 @@ def plot_optim(optimization):
                 )),row=1,col=1)
     if n_features == 2:
 
-        fig.add_trace(go.Scatter(x=cosines,y=sines,showlegend=False,marker=dict(
+        fig.add_trace(go.Scatter(x=x_params,y=y_params,showlegend=False,marker=dict(
                 color='powderblue'
                     )),row=1,col=2)
         for i, p in enumerate(projections):
-                a = float(p[0])/np.linalg.norm(p)
-                b = float(p[1])/np.linalg.norm(p)
+                a = float(p[0])#/np.linalg.norm(p)
+                b = float(p[1])#/np.linalg.norm(p)
                 fig.add_trace(go.Scatter(x=[a],y=[b],mode="markers",name="projection",showlegend=False,
                 marker=dict(
                 color=cmap2[i]
@@ -156,84 +167,6 @@ def plot_optim(optimization):
     fig.show()
 
 
-
-
-def plotly_geometric_network(G):
-        
-    edge_x = []
-    edge_y = []
-    for edge in G.edges():
-        x0, y0 = G.nodes[edge[0]]['pos']
-        x1, y1 = G.nodes[edge[1]]['pos']
-        edge_x.append(x0)
-        edge_x.append(x1)
-        edge_x.append(None)
-        edge_y.append(y0)
-        edge_y.append(y1)
-        edge_y.append(None)
-
-    edge_trace = go.Scatter(
-    x=edge_x, y=edge_y,
-    line=dict(width=0.5, color='#888'),
-    hoverinfo='none',
-    mode='lines')
-
-    node_x = []
-    node_y = []
-    for node in G.nodes():
-        x, y = G.nodes[node]['pos']
-        node_x.append(x)
-        node_y.append(y)
-
-    node_trace = go.Scatter(
-    x=node_x, y=node_y,
-    mode='markers',
-    hoverinfo='text',
-    marker=dict(
-        showscale=True,
-        # colorscale options
-        #'Greys' | 'YlGnBu' | 'Greens' | 'YlOrRd' | 'Bluered' | 'RdBu' |
-        #'Reds' | 'Blues' | 'Picnic' | 'Rainbow' | 'Portland' | 'Jet' |
-        #'Hot' | 'Blackbody' | 'Earth' | 'Electric' | 'Viridis' |
-        colorscale='Blues',
-        reversescale=True,
-        color=[],
-        size=6,
-        colorbar=dict(
-            thickness=15,
-            title='Node Connections',
-            xanchor='left',
-            titleside='right'
-        ),
-        line_width=0.3))
-
-    node_adjacencies = []
-    node_text = []
-    for node, adjacencies in enumerate(G.adjacency()):
-        node_adjacencies.append(len(adjacencies[1]))
-        node_text.append('# of connections: '+str(len(adjacencies[1])))
-
-    node_trace.marker.color = node_adjacencies
-    node_trace.text = node_text
-
-    fig = go.Figure(data=[edge_trace, node_trace],
-                layout=go.Layout(
-                title='<br>Neural network structure summary',
-                titlefont_size=16,
-                showlegend=False,
-                hovermode='closest',
-                margin=dict(b=20,l=5,r=5,t=40),
-                annotations=[ dict(
-                    text='',
-                    showarrow=False,
-                    xref="paper", yref="paper",
-                    x=0.005, y=-0.002 ) ],
-                xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                yaxis=dict(showgrid=False, zeroline=False, showticklabels=False))
-                )
-    fig.show()
-
-
 def MDS_analysis(matrices, labels_bb):
 
     n = len(matrices)
@@ -272,7 +205,33 @@ def MDS_analysis(matrices, labels_bb):
 
     fig.show()
 
-def heatmaps(matrices_tup):
+def heatmaps(matrices_tup, amp=False):
+
+    m = matrices_tup[0].shape[0]
+    n = matrices_tup[0].shape[1]
+
+    matrices_tup__ = tuple([np.hstack((D,D,D,D,D)) for D in matrices_tup])
+
+    if amp:
+        imgs_ = np.vstack(matrices_tup__).reshape(len(matrices_tup__),m,n*5)
+    else:
+
+        imgs_ = np.vstack(matrices_tup).reshape(len(matrices_tup),m,n)
+    fig = px.imshow(imgs_, facet_col=0, facet_col_wrap=len(matrices_tup), color_continuous_scale=[[0.0, "rgb(165,0,38)"],
+                    [0.1111111111111111, "rgb(215,48,39)"],
+                    [0.2222222222222222, "rgb(244,109,67)"],
+                    [0.3333333333333333, "rgb(253,174,97)"],
+                    [0.4444444444444444, "rgb(254,224,144)"],
+                    [0.5555555555555556, "rgb(224,243,248)"],
+                    [0.6666666666666666, "rgb(171,217,233)"],
+                    [0.7777777777777778, "rgb(116,173,209)"],
+                    [0.8888888888888888, "rgb(69,117,180)"],
+                    [1.0, "rgb(49,54,149)"]])
+    fig.update_layout(height=400, width=800,title="Heat maps of distance matrices")
+    fig.show()
+
+
+def heatmaps__(matrices_tup):
 
     m = matrices_tup[0].shape[0]
     n = matrices_tup[0].shape[1]

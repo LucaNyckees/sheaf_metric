@@ -11,9 +11,14 @@ from difftda import Cubical
 import n_sphere
 import copy
 
+# In this file, we implement the functions that make the topological optimization necessary to compute
+# a linear integral sheaf metric (LISM), and present a class pipeline() that allows to compute a distance
+# matrix encoding the LISMs between a given data set of observations (e.g. images or weighted graphs).
 
 
 class pipeline():
+
+    # class made for easily computing a LISM distance matrix between observations like images or weighted graphs.
 
     def __init__(self, object, meta_data, card, dims=[0]):
 
@@ -73,11 +78,13 @@ class pipeline():
 
 
             if epoch > 5:
-                diff = tf.abs(tf.norm(optimization['projections'][epoch])-tf.norm(optimization['projections'][epoch-1]))
+                diff = tf.abs(tf.norm(optimization['projections'][epoch],ord=1)-tf.norm(optimization['projections'][epoch-1],ord=1))
                     
-                if diff < 0.00005 or any(tf.math.sign(model.p)<0):
+                if diff < 0.00005 or epoch==50: #or any(tf.math.sign(model.p)<0):
+
+                    print(epoch)
                         
-                    p_opt = model.p/tf.norm(model.p)
+                    p_opt = model.p/tf.norm(model.p,ord=1)
 
                     model.p = p_opt
 
@@ -112,7 +119,7 @@ class pipeline():
                     #dgm1, dgm2 = model.call()
 
                     amplitude = alpha * wasserstein_distance(dgm1, dgm2, order=2, enable_autodiff=True)
-                    loss = - amplitude + lambda_*(tf.norm(model.p)-1)**2
+                    loss = - amplitude + lambda_*(tf.norm(model.p,ord=1)-1)**2
 
                     #optimization['projections'].append(model.p.numpy())
                     optimization['projections'].append(p_copy)
@@ -134,7 +141,7 @@ class pipeline():
                 
                 if use_reg:
                     amplitude = alpha * wasserstein_distance(dgm1, dgm2, order=2, enable_autodiff=True)
-                    loss = - amplitude + lambda_*(tf.norm(model.p)-1)**2 #- s
+                    loss = - amplitude + lambda_*(tf.norm(model.p,ord=1)-1)**2 #- s
                 else:
                     amplitude = alpha * wasserstein_distance(dgm1, dgm2, order=2, enable_autodiff=True)
                     loss = - amplitude 
@@ -160,21 +167,20 @@ class pipeline():
 
     def fast_optim(self, model, use_reg=True, alpha=1, lambda_=1, sigma=0.001):
 
+        # optimization with SGD that stores a minimal amount of information.
+
         lr = tf.keras.optimizers.schedules.InverseTimeDecay(initial_learning_rate=0.7, decay_steps=10, decay_rate=.1)
         optimizer = tf.keras.optimizers.SGD(learning_rate=lr)
-        # init_lr = 0.5
-        # decay_steps = 10
-        # decay_rate = .01
         projections = [] 
 
         for epoch in range(50+1):
 
             if epoch > 5:
-                diff = tf.abs(tf.norm(projections[epoch])-tf.norm(projections[epoch-1]))
+                diff = tf.abs(tf.norm(projections[epoch],ord=1)-tf.norm(projections[epoch-1],ord=1))
                     
                 if diff < 0.005 or any(tf.math.sign(model.p)<0):
                         
-                    p_opt = model.p/tf.norm(model.p)
+                    p_opt = model.p/tf.norm(model.p,ord=1)
 
                     model.p = p_opt
 
@@ -216,7 +222,7 @@ class pipeline():
                 
                 if use_reg:
                     amplitude = alpha * wasserstein_distance(dgm1, dgm2, order=2, enable_autodiff=True)
-                    loss = - amplitude + lambda_*(tf.norm(model.p)-1)**2
+                    loss = - amplitude + lambda_*(tf.norm(model.p,ord=1)-1)**2
                 else:
                     amplitude = alpha * wasserstein_distance(dgm1, dgm2, order=2, enable_autodiff=True)
                     loss = - amplitude 
@@ -235,6 +241,8 @@ class pipeline():
 
 
     def distance_matrix(self, dim, fast=True):
+
+        # computes a distance matrix of size NxN for a given set of N observations
 
         N = self.meta_data[0].shape[0]
         data = self.meta_data[0]
@@ -294,6 +302,8 @@ class pipeline():
 
     def single_distance(self, dim=0, p_init = 0):
 
+        # computes a single LISM between two observations.
+
         data = self.meta_data[0]
         N = data.shape[0]
         n_features = data.shape[-1]
@@ -335,9 +345,12 @@ class pipeline():
 
 
 def grid_search(I, J, step=0.01, plotting=False, dim=1, card=50):
+
+    # computes a single LISM with a grid search (expensive in high dimension,
+    # but is used to proofcheck the results obtained with topological optimization).
     
-    angles = np.arange(0, math.pi/2, step)
-    linear_forms = [np.array([math.cos(theta), math.sin(theta)]).reshape(2,1) for theta in angles ]
+    params = np.arange(0, 1, step)
+    linear_forms = [np.array([t,1-t]).reshape(2,1) for t in params ]
 
     distances = []
 
@@ -367,15 +380,15 @@ def grid_search(I, J, step=0.01, plotting=False, dim=1, card=50):
         dgm1 = tf.reshape(tf.gather_nd(Ip, tf.reshape(inds1, [-1,D])), [-1,2])
         dgm2 = tf.reshape(tf.gather_nd(Jp, tf.reshape(inds2, [-1,D])), [-1,2])
         
-        distances.append(tf.sqrt(wasserstein_distance(dgm1, dgm2, order=2)))
+        distances.append(wasserstein_distance(dgm1, dgm2, order=2))
 
     dist = max(distances)
     index = distances.index(dist)
-    angle = angles[index]
+    angle = params[index]
 
     if plotting:
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x=angles,y=distances))
+        fig.add_trace(go.Scatter(x=params,y=distances))
         fig.add_trace(go.Scatter(x=[angle,angle],y=[0,dist],line = dict(width=1, dash='dot'),showlegend=False))
         fig.add_trace(go.Scatter(x=[0,angle],y=[dist,dist],line = dict(width=1, dash='dot'),showlegend=False))
         fig.add_trace(go.Scatter(x=[angle],y=[dist],mode='markers',name="maximum"))
@@ -394,43 +407,14 @@ def grid_search(I, J, step=0.01, plotting=False, dim=1, card=50):
 
 
 
-def grid_search_amp(I, step=0.01, dim=1, card=50):
-    
-    angles = np.arange(0, math.pi/2, step)
-    linear_forms = [np.array([math.cos(theta), math.sin(theta)]).reshape(2,1) for theta in angles ]
-
-    amplitudes = []
-
-    # Turn numpy function into tensorflow function
-    CbTF = lambda X: tf.numpy_function(Cubical, [X, d, c], [tf.int32 for _ in range(2*D*c)])
-
-    for p_ in linear_forms:
-
-        p = tf.Variable(initial_value=p_, dtype=np.float32)
-
-        Ip = tf.reshape(tf.tensordot(I,p,1),shape=[28,28])
-
-        d, c, D = dim, card, len(Ip.shape)
-        XX = tf.reshape(Ip, [1, Ip.shape[0], Ip.shape[1]])
-        
-        inds = tf.nest.map_structure(tf.stop_gradient, tf.map_fn(CbTF,XX,fn_output_signature=[tf.int32 for _ in range(2*D*c)]))
-        dgm = tf.reshape(tf.gather_nd(Ip, tf.reshape(inds, [-1,D])), [-1,2])
-        
-        amplitudes.append(tf.sqrt(wasserstein_distance(dgm, [], order=2)))
-
-    amp = max(amplitudes)
-    
-    return amp
-
-
 def fast_grid_search(I, J, step = 0.01, dim=1):
 
     if I.shape[-1]!=2:
         print("The fast grid search method should only be applied for the case of bi-filtrations (n_features=2). Here, n_features={}.".format(I.shape[-1]))
         return None
     
-    angles = np.arange(0, math.pi/2, step)
-    linear_forms = [np.array([math.cos(theta), math.sin(theta)]).reshape(2,1) for theta in angles ]
+    params = np.arange(0, 1, step)
+    linear_forms = [np.array([t,1-t]).reshape(2,1) for t in params ]
 
     distances = []
 
@@ -462,6 +446,8 @@ def fast_grid_search(I, J, step = 0.01, dim=1):
 
 
 
+
+
 def fast_optim(model, use_reg=True, alpha=1, lambda_=1, sigma=0.001):
 
         lr = tf.keras.optimizers.schedules.InverseTimeDecay(initial_learning_rate=0.7, decay_steps=10, decay_rate=.1)
@@ -474,11 +460,11 @@ def fast_optim(model, use_reg=True, alpha=1, lambda_=1, sigma=0.001):
         for epoch in range(50+1):
 
             if epoch > 5:
-                diff = tf.abs(tf.norm(projections[epoch-1])-tf.norm(projections[epoch-2]))
+                diff = tf.abs(tf.norm(projections[epoch-1],ord=1)-tf.norm(projections[epoch-2],ord=1))
                     
                 if diff < 0.005 or any(tf.math.sign(model.p)<0):
                         
-                    p_opt = model.p/tf.norm(model.p)
+                    p_opt = model.p/tf.norm(model.p,ord=1)
 
                     model.p = p_opt
 
@@ -520,7 +506,7 @@ def fast_optim(model, use_reg=True, alpha=1, lambda_=1, sigma=0.001):
                 
                 if use_reg:
                     amplitude = alpha * wasserstein_distance(dgm1, dgm2, order=2, enable_autodiff=True)
-                    loss = - amplitude + lambda_*(tf.norm(model.p)-1)**2
+                    loss = - amplitude + lambda_*(tf.norm(model.p,ord=1)-1)**2
                 else:
                     amplitude = alpha * wasserstein_distance(dgm1, dgm2, order=2, enable_autodiff=True)
                     loss = - amplitude 
