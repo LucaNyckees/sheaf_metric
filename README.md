@@ -4,12 +4,13 @@ This project is supervised by Nicolas Berkouk and Kathryn Hess Bellwald, from th
 
 ## Table of Content
 
-* [People](#people)
-* [Description](#description)
-* [Project Organization](#project-organization)
-* [Streamlit Web App](#streamlit)
-* [Related Articles and Useful References](#refs)
-* [Interesting Material 🔍](#material)
+- [People](#people)
+- [Description](#description)
+- [Virtual Environment](#virtual-environment)
+- [Project Organization](#project-organization)
+- [Streamlit Web App](#streamlit)
+- [Related Articles and Useful References](#refs)
+- [Interesting Material 🔍](#material)
 
 ## People
 
@@ -22,16 +23,36 @@ Topological data analysis emerged, as a field of mathematics, as a powerful tool
 
 ## Description
 
-The class of integral sheaf metrics is an esemble of distances between multi-parameter persistence modules that successfully tackles the issues encountered with the matching distance. Through computational geometry and optimization machine learning, we provide a way to efficiently compute the so-called linear integral sheaf metric. We also present applications to data classification - the input to standard clustering algorithms is a distance matrix encoding pairwise linear integral sheaf metrics between multi-parameter persistence modules. 
+The class of integral sheaf metrics is an esemble of distances between multi-parameter persistence modules that successfully tackles the issues encountered with the matching distance. Through computational geometry and optimization machine learning, we provide a way to efficiently compute the so-called linear integral sheaf metric. We also present applications to data classification - the input to standard clustering algorithms is a distance matrix encoding pairwise linear integral sheaf metrics between multi-parameter persistence modules.
 
 <p align="center">
-<img width="800" alt="figure" src="https://github.com/LucaNyckees/sheaf_metric/blob/main/def_ISM.png">
+<img width="800" alt="figure" src="https://github.com/LucaNyckees/topology-metric/blob/main/def_ISM.png">
 </p>
 
+## Virtual Environment
 
+### Virtual environment
+
+```
+python3.11 -m venv venv
+source venv/bin/activate
+```
+
+### Install packages
+
+```
+pip install -r requirements.txt
+```
+
+### Exit virtual environment
+
+```
+deactivate
+```
 
 ## Project Organization
-------------
+
+---
 
     ├── README.md          -- Top-level README.
     │
@@ -45,5 +66,5 @@ The class of integral sheaf metrics is an esemble of distances between multi-par
     │
     ├── requirements.txt   -- Requirements file for reproducibility.
     └── src                -- Project source code.
-   
---------
+
+---

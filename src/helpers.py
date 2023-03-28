@@ -16,7 +16,7 @@ import plotly.figure_factory as ff
 from plotly.colors import n_colors
 import plotly.express as px
 import networkx as nx
-from LISM import fast_grid_search, pipeline
+from src.LISM import fast_grid_search, pipeline
 import n_sphere
 from sklearn.manifold import MDS
 
